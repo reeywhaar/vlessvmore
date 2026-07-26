@@ -296,6 +296,12 @@ go test ./...
 docker build -t vlessvmore:dev .
 ```
 
+`ghcr.io/reeywhaar/vlessvmore:latest` is published by
+[.github/workflows/publish.yml](.github/workflows/publish.yml) on every push to `main`,
+for `linux/amd64` and `linux/arm64`, after `go vet` and the test suite pass. Only `latest`
+is tagged, so the commit is embedded at build time instead — `vlessvmore version` reports
+it.
+
 The image builds sing-box itself with the upstream default tags plus `with_v2ray_api`,
 and fails the build if that tag is missing rather than letting you discover it later from
 traffic stuck at zero. Confirm any image with:
@@ -307,6 +313,10 @@ docker run --rm --entrypoint sing-box vlessvmore:dev version
 The sing-box stage pins an older Go on purpose — see the comment in the
 [Dockerfile](Dockerfile). sing-box reaches into `crypto/tls` internals via
 `//go:linkname`, and newer toolchains break that.
+
+Both Go stages cross-compile from the build platform rather than running under emulation,
+so a two-architecture build costs about the same as one. The build-tag check inspects the
+binary instead of executing it, since cross-compiled output cannot run on the builder.
 
 `private/` is a gitignored scratch directory for real configs, keys and deploy notes. Nothing sensitive belongs anywhere else in the tree, tests included: the vectors
 here are the public ones from RFC 7748.
