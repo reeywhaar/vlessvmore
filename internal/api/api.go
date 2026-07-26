@@ -42,9 +42,15 @@ func New(cfg *config.Config, st *store.Store, mgr *singbox.Manager, log *slog.Lo
 func (s *Server) Handler(requireAuth bool) http.Handler {
 	mux := http.NewServeMux()
 
-	// Unauthenticated: a health check that needs a credential is not much use to a
-	// container orchestrator.
-	mux.HandleFunc("GET /healthz", s.healthz)
+	// Takes unmatched paths, and also method mismatches, which ServeMux would otherwise
+	// answer with a 405 that admits the path exists.
+	mux.HandleFunc("/", s.notFound)
+
+	// Socket only. A JSON health check answering strangers is a fingerprint no static
+	// site has, and the image's HEALTHCHECK runs `vlessvmore status`, which comes in here.
+	if !requireAuth {
+		mux.HandleFunc("GET /healthz", s.healthz)
+	}
 
 	// The cover page. When a reverse proxy fronts this service on the same hostname
 	// Reality uses for its handshake, that hostname has to look like an ordinary web
@@ -79,25 +85,34 @@ func (s *Server) Handler(requireAuth bool) http.Handler {
 	if requireAuth {
 		h = s.authenticate(h)
 	}
-	return s.logRequests(h)
+	return s.logRequests(s.antibunsteal(requireAuth, h))
 }
 
-// authenticate enforces a bearer token on everything but /healthz.
+// isPublic reports whether a path is reachable without a bearer token. Prefixes, not
+// exact paths — so nothing private may ever be registered under one.
+func isPublic(path string) bool {
+	if path == "/" {
+		return true
+	}
+	return strings.HasPrefix(path, SubPath)
+}
+
+// authenticate enforces a bearer token on everything that is not public. A rejection is
+// notFound, not a 401: a legitimate caller already knows the endpoint is there, and
+// WWW-Authenticate would name the software in its realm.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, SubPath) {
+		if isPublic(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		secret, ok := bearer(r)
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="vlessvmore"`)
-			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			s.notFound(w, r)
 			return
 		}
 		if !s.validSecret(secret, time.Now()) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="vlessvmore"`)
-			writeError(w, http.StatusUnauthorized, "invalid bearer token")
+			s.notFound(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)

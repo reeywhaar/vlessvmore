@@ -87,6 +87,9 @@ func decodeBody[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 	return out
 }
 
+// A failed authentication is a 404, not a 401: see the authenticate doc comment. The
+// interesting half of that promise — that it is the *same* 404 as any other refusal — is
+// tested in probe_test.go.
 func TestAuthRequiredOnTCP(t *testing.T) {
 	s, st := testServer(t)
 	h := s.Handler(true)
@@ -97,10 +100,10 @@ func TestAuthRequiredOnTCP(t *testing.T) {
 		header string
 		want   int
 	}{
-		{"no header", "", http.StatusUnauthorized},
-		{"wrong scheme", "Basic abc", http.StatusUnauthorized},
-		{"empty bearer", "Bearer ", http.StatusUnauthorized},
-		{"wrong token", "Bearer nope", http.StatusUnauthorized},
+		{"no header", "", http.StatusNotFound},
+		{"wrong scheme", "Basic abc", http.StatusNotFound},
+		{"empty bearer", "Bearer ", http.StatusNotFound},
+		{"wrong token", "Bearer nope", http.StatusNotFound},
 		{"minted token", "Bearer " + token, http.StatusOK},
 		{"case-insensitive scheme", "bearer " + token, http.StatusOK},
 	}
@@ -128,17 +131,32 @@ func TestSocketHandlerSkipsAuth(t *testing.T) {
 	}
 }
 
-func TestHealthzAndRootAreUnauthenticated(t *testing.T) {
+func TestRootIsUnauthenticated(t *testing.T) {
 	s, _ := testServer(t)
-	h := s.Handler(true)
 
-	for _, path := range []string{"/healthz", "/"} {
-		req := httptest.NewRequest("GET", path, nil)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Errorf("GET %s = %d, want 200", path, rec.Code)
-		}
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	s.Handler(true).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET / = %d, want 200", rec.Code)
+	}
+}
+
+// The health check exists for the container runtime, which reaches it over the socket.
+// Exposing it on the public listener would answer strangers with JSON no static site
+// serves, which is exactly the fingerprint the cover page is there to avoid.
+func TestHealthzIsSocketOnly(t *testing.T) {
+	s, _ := testServer(t)
+
+	if rec := do(t, s, "GET", "/healthz", ""); rec.Code != http.StatusOK {
+		t.Errorf("socket GET /healthz = %d, want 200", rec.Code)
+	}
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	rec := httptest.NewRecorder()
+	s.Handler(true).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("public GET /healthz = %d, want 404: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -453,7 +471,7 @@ func TestTokenCreateAndAuthenticate(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+created.Secret)
 	authRec = httptest.NewRecorder()
 	s.Handler(true).ServeHTTP(authRec, req)
-	if authRec.Code != http.StatusUnauthorized {
+	if authRec.Code != http.StatusNotFound {
 		t.Errorf("deleted token still authenticates: %d", authRec.Code)
 	}
 }
@@ -490,11 +508,13 @@ func TestResetUsageEndpoint(t *testing.T) {
 	}
 }
 
-func TestMethodNotAllowed(t *testing.T) {
+// ServeMux would answer 405 for a known path with a wrong verb, which confirms the path
+// exists. The catch-all takes those too, so a wrong method is as uninformative as a wrong
+// path.
+func TestMethodMismatchIs404(t *testing.T) {
 	s, _ := testServer(t)
-	// Registered as GET only; ServeMux answers 405 for a known path with a wrong verb.
 	rec := do(t, s, "POST", "/api/server", "")
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status = %d, want 405", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }

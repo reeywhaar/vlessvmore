@@ -199,8 +199,8 @@ func TestSubscriptionUserinfoOmitsOnlyWhatIsUnset(t *testing.T) {
 	}
 }
 
-// An unknown token must be indistinguishable from any other unmatched path, so probing
-// reveals nothing about what this server is.
+// An unknown token must be indistinguishable from any other unmatched path, so poking
+// at it reveals nothing about what this server is.
 func TestSubscriptionUnknownTokenIs404(t *testing.T) {
 	s, _ := testServer(t)
 	newUserWithSub(t, s, `{"name":"alice"}`)

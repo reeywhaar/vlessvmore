@@ -10,7 +10,7 @@ cannot drift apart.
 
 ## Authentication
 
-`Authorization: Bearer <secret>` on every endpoint except `GET /` and `GET /healthz`.
+`Authorization: Bearer <secret>` on every endpoint except `GET /` and `GET /sub/{token}`.
 
 ```sh
 TOKEN=$(docker exec vlessvmore vlessvmore token create web --raw)
@@ -29,8 +29,11 @@ can bootstrap without one:
 TOKEN=$(docker exec vlessvmore vlessvmore token create ci --raw)
 ```
 
-A missing or unrecognised token gets `401` with `WWW-Authenticate: Bearer`. Revoked and
-unknown tokens are indistinguishable, on purpose.
+A missing or unrecognised token gets a plain `404`, byte-identical to the one an
+unregistered path returns, and takes the same time to arrive. There is no `401` and no
+`WWW-Authenticate` header. Revoked tokens, unknown tokens, wrong methods and paths that
+never existed are all the same answer, on purpose — see
+[Refusals](#refusals) below.
 
 ## Errors
 
@@ -39,11 +42,12 @@ Non-2xx responses are `{"error": "<message>"}`.
 | status | meaning |
 | --- | --- |
 | `400` | bad input: malformed JSON, unknown field, invalid UUID, negative quota |
-| `401` | missing or invalid token |
-| `404` | no such user or token |
-| `405` | wrong method for a known path |
+| `404` | no such user or token — *or* no valid credential; see [Refusals](#refusals) |
 | `409` | name or UUID already taken |
 | `500` | something failed on our side: disk, database, config generation |
+
+Note the absent rows. There is no `401` and no `405`: both would confirm that a path
+exists.
 
 Unknown JSON fields are rejected rather than ignored, so a typo fails loudly instead of
 silently doing nothing.
@@ -263,9 +267,9 @@ config does not depend on the subscription token.
 send an `Authorization` header, so a 160-bit capability URL is the only workable design. It
 is exactly as sensitive as the credential it returns.
 
-Outside `/api` on purpose, so it is obvious this route is public. An unknown token gets a
-plain `404`, identical to any other unmatched path, so probing reveals nothing about
-whether this is a subscription server at all.
+Outside `/api` on purpose, so it is obvious this route is public. An unknown token gets
+the same `404` as any other refusal, so poking at it reveals nothing about whether this is
+a subscription server at all.
 
 | query | default | effect |
 | --- | --- | --- |
@@ -399,6 +403,33 @@ Accepts an id or a label. The token stops working immediately.
 
 ---
 
+## Refusals
+
+Every way this server says no produces the same answer:
+
+```
+HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+404 page not found
+```
+
+That covers a path that does not exist, a path that does but with the wrong method, a
+request with no bearer token, one with a revoked or invalid token, and an unknown
+subscription token. The body is Go's stdlib 404 verbatim.
+
+Refusals on the TCP listener are also padded to a fixed delay of roughly 60–150 ms,
+measured from when the request arrived rather than added to the work. Response time
+therefore carries no information about *why* the request was refused — without it, "this
+subscription token exists" is measurably slower to reject than "this path was never
+registered", and enough samples recover the difference.
+
+Refusals over the unix socket are not padded: the CLI hits it constantly and nobody can
+reach it without already being root in the container.
+
+The cost of this is that a legitimate caller with a stale token sees `404` rather than a
+message telling them to renew it. Check `vlessvmore token list`.
+
 ## Unauthenticated endpoints
 
 ### `GET /healthz`
@@ -406,6 +437,10 @@ Accepts an id or a label. The token stops working immediately.
 ```json
 { "ok": true }
 ```
+
+**Socket only.** Not served on the TCP listener, where it would answer strangers with JSON
+no static site serves. The container's `HEALTHCHECK` runs `vlessvmore status`, which goes
+over the socket. If you need an external HTTP health check, point it at `GET /`.
 
 ### `GET /`
 

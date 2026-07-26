@@ -69,7 +69,7 @@ services:
       # genuine certificate for this hostname, and that certificate is exactly
       # what Reality's handshake borrows when it forwards non-authenticated
       # traffic to caddy-caddy-1:443. Without it the handshake target has no
-      # valid cert for the SNI and a probing client sees through the disguise.
+      # valid cert for the SNI and a curious client sees through the disguise.
       #
       # Proxying to our own port 80 means the hostname serves something real:
       # a browser gets a plain 200, the management API lives under /api behind its

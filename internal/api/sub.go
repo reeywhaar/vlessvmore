@@ -26,13 +26,13 @@ const subUpdateHours = 24
 // will attach a bearer token — but it does mean the URL is exactly as sensitive as the
 // credential it returns.
 //
-// An unknown token gets a plain 404, identical to any other unmatched path, so probing
-// this endpoint reveals nothing about whether it is a subscription server at all.
+// An unknown token gets the same padded 404 as any other refusal — same bytes, same
+// timing — so poking at this endpoint says nothing about what it is.
 func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	u, err := s.store.Users.GetBySubToken(token)
 	if err != nil {
-		http.NotFound(w, r)
+		s.notFound(w, r)
 		return
 	}
 

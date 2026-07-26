@@ -118,7 +118,7 @@ loopback instead:
 ## The Reality handshake, and why Caddy helps
 
 Reality forwards any connection that fails to authenticate to a **real** TLS server, so
-a prober sees a legitimate site rather than a proxy. That server must hold a valid
+a stranger sees a legitimate site rather than a proxy. That server must hold a valid
 certificate for your SNI, or the disguise fails.
 
 [caddy-docker-proxy](https://github.com/lucaslorentz/caddy-docker-proxy) makes this
@@ -277,6 +277,16 @@ that traffic between the last poll and a sing-box restart goes unrecorded.
 
 **Verify with a sing-box client.** Reality behaviour differs subtly between cores; test
 with something sing-box-based such as Hiddify rather than an Xray client.
+
+**Every refusal looks the same.** Anything the HTTP API declines — a path that does not
+exist, the wrong method on one that does, a missing or revoked bearer token, an unknown
+subscription token — comes back as the same plain `404`, padded to a fixed ~60–150 ms so
+the response time carries no information either. There is no `401`, no `405` and no
+`WWW-Authenticate` header for anyone to walk the host with. The price is that a stale
+token reads as `404` rather than as "renew me"; `vlessvmore token list` is where to look.
+`GET /healthz` moved to the unix socket for the same reason — it answered strangers with
+JSON no static site serves. The container's `HEALTHCHECK` already runs `vlessvmore
+status`, which goes over the socket, so point any external HTTP check at `GET /` instead.
 
 **Subscription URLs are capabilities.** Anyone holding one can fetch that user's
 credential — no header, no password. They are exactly as sensitive as the link itself.
