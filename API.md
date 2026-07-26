@@ -1,0 +1,420 @@
+# vlessvmore HTTP API
+
+The management API. Everything the CLI does goes through these endpoints, so the two
+cannot drift apart.
+
+- Base path: `/api`
+- Content type: `application/json` in both directions
+- All timestamps are RFC3339 UTC
+- All byte counts are integers
+
+## Authentication
+
+`Authorization: Bearer <secret>` on every endpoint except `GET /` and `GET /healthz`.
+
+```sh
+TOKEN=$(docker exec vlessvmore vlessvmore token create web --raw)
+curl -sH "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/users
+```
+
+Tokens come from `POST /api/tokens` and are compared against a stored SHA-256 hash. There
+is no bootstrap credential to configure or forget to remove.
+
+Requests over the container's unix socket (`/run/vlessvmore/manager.sock`) skip
+authentication: reaching it already requires root inside the container, which is more
+access than any token grants. That is how the first token gets minted, and how automation
+can bootstrap without one:
+
+```sh
+TOKEN=$(docker exec vlessvmore vlessvmore token create ci --raw)
+```
+
+A missing or unrecognised token gets `401` with `WWW-Authenticate: Bearer`. Revoked and
+unknown tokens are indistinguishable, on purpose.
+
+## Errors
+
+Non-2xx responses are `{"error": "<message>"}`.
+
+| status | meaning |
+| --- | --- |
+| `400` | bad input: malformed JSON, unknown field, invalid UUID, negative quota |
+| `401` | missing or invalid token |
+| `404` | no such user or token |
+| `405` | wrong method for a known path |
+| `409` | name or UUID already taken |
+| `500` | something failed on our side: disk, database, config generation |
+
+Unknown JSON fields are rejected rather than ignored, so a typo fails loudly instead of
+silently doing nothing.
+
+## Mutations and reloads
+
+Changing a user rewrites sing-box's config and reloads it. Because that is a second
+step which can fail on its own, mutation responses wrap the result:
+
+```json
+{
+  "result":   { "id": "u_0B4X…", "name": "alice", … },
+  "reloaded": true
+}
+```
+
+If the reload failed, `reloaded` is `false` and `reload_error` explains why. **The
+status code is still 2xx**: the change is saved and will take effect on the next
+successful reload. Only the reload did not happen.
+
+Reloads within about a second of each other are coalesced into one, because each reload
+drops established connections.
+
+---
+
+## Users
+
+A `{id}` path parameter accepts either the internal id (`u_0B4X…`) or the display name,
+matched case-insensitively. `user show alice` and `user show u_0B4X…` are the same call.
+
+### `GET /api/users`
+
+| query | effect |
+| --- | --- |
+| `include=usage` | add the `usage` object to each user |
+
+```json
+{
+  "users": [
+    {
+      "id": "u_0B4X6TWQ8ZKM3N1PVJHR5DGYAC",
+      "name": "alice",
+      "uuid": "268e4039-6dd0-4d35-b279-b97639d9eed3",
+      "enabled": true,
+      "quota_bytes": 107374182400,
+      "expires_at": "2026-08-25T02:46:57Z",
+      "usage_reset_at": "2026-07-26T02:46:57Z",
+      "note": "phone",
+      "created_at": "2026-07-26T02:46:57Z",
+      "updated_at": "2026-07-26T02:46:57Z"
+    }
+  ]
+}
+```
+
+`quota_bytes: 0` means unlimited. `expires_at` absent means never. `disabled_reason` is
+present only when enforcement turned the user off, and is `"quota"` or `"expired"`.
+
+`sub_token` is the path segment of the user's subscription URL, and `subscription_url` is
+that URL assembled. Both are credentials.
+
+### `GET /api/users/{id}`
+
+One user, always including `usage`.
+
+```json
+{
+  "id": "u_0B4X…",
+  "name": "alice",
+  "usage": {
+    "up": 1048576,
+    "down": 4194304,
+    "total": 5242880,
+    "window_up": 1048576,
+    "window_down": 4194304,
+    "window_total": 5242880,
+    "quota_bytes": 107374182400,
+    "quota_remaining": 107368939520
+  }
+}
+```
+
+`total` is lifetime; `window_*` counts only since `usage_reset_at`, which is what the
+quota is measured against. `quota_remaining` is `0` when unlimited.
+
+### `POST /api/users`
+
+```json
+{
+  "name": "alice",
+  "uuid": "268e4039-…",
+  "quota_bytes": 107374182400,
+  "expires_at": "2026-12-31T00:00:00Z",
+  "enabled": true,
+  "note": "phone"
+}
+```
+
+Only `name` is required. `uuid` is generated when omitted. `201` on success.
+
+### `PATCH /api/users/{id}`
+
+Accepts `name`, `uuid`, `enabled`, `quota_bytes`, `expires_at`, `note`. Absent fields
+are left alone.
+
+`expires_at` is three-valued, and the distinction matters:
+
+| body | effect |
+| --- | --- |
+| field absent | expiry unchanged |
+| `"expires_at": "2026-12-31T00:00:00Z"` | set it |
+| `"expires_at": null` | remove it |
+
+Renaming keeps the internal id, so **usage history survives a rename** — sing-box is
+told the id, never the display name.
+
+Changing `uuid` invalidates the user's existing client configuration.
+
+### `DELETE /api/users/{id}`
+
+Deletes the user and their usage history. Not reversible.
+
+```json
+{ "result": { "deleted": "u_0B4X…", "name": "alice" }, "reloaded": true }
+```
+
+### `POST /api/users/{id}/reset-usage`
+
+Starts a new quota window at now, and re-enables the user if they were disabled *for
+quota*. History is not deleted — the traffic still happened, it just stops counting
+against the current quota. A user disabled by hand stays disabled.
+
+### `GET /api/users/{id}/usage`
+
+| query | default | notes |
+| --- | --- | --- |
+| `from` | 7 days ago | RFC3339, `YYYY-MM-DD`, or a unix timestamp |
+| `to` | now | same |
+| `bucket` | `hour` | `hour` or `day` |
+
+```json
+{
+  "user_id": "u_0B4X…",
+  "name": "alice",
+  "from": "2026-07-19T00:00:00Z",
+  "to": "2026-07-26T00:00:00Z",
+  "bucket": "day",
+  "series": [
+    { "bucket": "2026-07-25T00:00:00Z", "up": 1048576, "down": 4194304 }
+  ],
+  "summary": { "up": 1048576, "down": 4194304, "total": 5242880, … }
+}
+```
+
+Empty intervals are **omitted, not zero-filled** — a caller drawing a graph knows the
+range it asked for. Traffic is recorded in whole UTC hours, so a range starting
+mid-hour includes that whole hour.
+
+### `GET /api/users/{id}/link`
+
+The `vless://` URI, the subscription URL, and the URI as a QR bit matrix.
+
+| query | effect |
+| --- | --- |
+| `qr=false` | omit the `qr` object |
+
+```json
+{
+  "user_id": "u_0B4X…",
+  "name": "alice",
+  "link": "vless://268e4039-…@vpn.example.com:8443?type=tcp&…#alice",
+  "subscription_url": "https://vpn.example.com/sub/QK7M2X…",
+  "qr": {
+    "size": 57,
+    "rows": ["101110100…", "100000101…"],
+    "quiet_zone": 4
+  }
+}
+```
+
+`rows` has `size` entries, each a `size`-character string of `'0'` (light) and `'1'`
+(dark), top row first. The matrix is always square.
+
+Modules rather than a PNG, so a client can render at any scale in any colours — SVG,
+canvas, table cells — which a fixed-size raster would prevent. **Add `quiet_zone`
+modules of light margin around it**: without that margin many scanners will not lock
+on, and the failure looks like a broken code rather than a missing border.
+
+Minimal renderer:
+
+```js
+const { size, rows, quiet_zone: q } = data.qr;
+const side = size + q * 2;
+const svg = [`<svg viewBox="0 0 ${side} ${side}" shape-rendering="crispEdges">`,
+             `<rect width="${side}" height="${side}" fill="#fff"/>`];
+rows.forEach((row, y) => [...row].forEach((bit, x) => {
+  if (bit === "1") svg.push(`<rect x="${x + q}" y="${y + q}" width="1" height="1"/>`);
+}));
+svg.push("</svg>");
+```
+
+### `POST /api/users/{id}/rotate-sub`
+
+Issues a new subscription token, invalidating the old URL immediately. Returns the user.
+
+The UUID is untouched, so an already-configured client keeps connecting — this cuts off a
+leaked subscription URL without disconnecting anyone. No reload happens, because sing-box's
+config does not depend on the subscription token.
+
+---
+
+## Subscriptions
+
+### `GET /sub/{token}`
+
+**Unauthenticated.** The token in the path is the credential: subscription clients cannot
+send an `Authorization` header, so a 160-bit capability URL is the only workable design. It
+is exactly as sensitive as the credential it returns.
+
+Outside `/api` on purpose, so it is obvious this route is public. An unknown token gets a
+plain `404`, identical to any other unmatched path, so probing reveals nothing about
+whether this is a subscription server at all.
+
+| query | default | effect |
+| --- | --- | --- |
+| `format=base64` | ✓ | base64 of the newline-separated URIs — the de-facto standard |
+| `format=uri` | | the raw `vless://` URI, unencoded (`plain` is a synonym) |
+
+Response headers are the reason to prefer a subscription over a pasted link — they are
+what makes a client display remaining traffic and an expiry date in its own UI:
+
+```
+Subscription-Userinfo: upload=1048576; download=4194304; total=107374182400; expire=1787011200
+Profile-Update-Interval: 24
+Profile-Title: base64:YWxpY2U=
+Cache-Control: no-store, no-cache, must-revalidate
+```
+
+| field | meaning |
+| --- | --- |
+| `upload` / `download` | bytes since the user's current quota window began |
+| `total` | the quota in bytes; **omitted entirely when the user is unlimited** |
+| `expire` | expiry as unix seconds; **omitted entirely when the user never expires** |
+
+`total` and `expire` are **left out rather than sent as `0`**. The convention says zero
+means unlimited, but clients do not implement it reliably — Hiddify given `total=0`
+invents a ceiling of its own (~85.9 GiB, the leading digits of `MaxInt64`) and shows a
+limit the server never set. Omitting the field gives it nothing to misread. An unlimited,
+non-expiring user therefore gets just `upload=…; download=…`.
+
+`Profile-Title` is the server's configured `name`, falling back to the user's own name
+when unset — the same label as the `vless://` fragment, so a client shows one thing
+however the profile was added. `Profile-Update-Interval` is in hours. `Cache-Control` is `no-store` because a cached
+credential would outlive its revocation.
+
+A **disabled or expired user still gets a 200** with their link and honest
+`Subscription-Userinfo`. The credential is already theirs and will not work — they are
+absent from sing-box's config — but the headers are what let a client say "quota
+exhausted" instead of showing a bare error.
+
+There is no rate limiting on this endpoint. Put it behind a reverse proxy if that matters
+to you.
+
+---
+
+## Server
+
+### `GET /api/server`
+
+Everything a client needs to connect, and nothing secret.
+
+```json
+{
+  "host": "vpn.example.com",
+  "port": 8443,
+  "sni": "vpn.example.com",
+  "public_key": "Z0PwFQzd7TTduOXwDLQ7XePJXrtv6O7THdYg6aRloAo",
+  "short_id": "6048316bbc9ca90e",
+  "flow": "xtls-rprx-vision",
+  "fingerprint": "chrome",
+  "handshake": "caddy-caddy-1:443"
+}
+```
+
+`public_key` is derived from the private key on each request and is never stored, so the
+two halves cannot drift apart. **The private key is never returned by any endpoint** — it
+lives in `data/identity.json` and is managed with the `vlessvmore identity` CLI, not over
+HTTP.
+
+There is no `PATCH /api/server`: `config.json` is read-only operator input. To change the
+host or port, edit it and restart.
+
+### `GET /api/status`
+
+```json
+{
+  "sing_box": {
+    "running": true,
+    "pid": 28,
+    "started_at": "2026-07-26T02:45:35Z",
+    "config_path": "/var/lib/vlessvmore/sing-box.json",
+    "active_users": 2,
+    "last_reload": "2026-07-26T02:46:58Z"
+  },
+  "sing_box_version": "sing-box version 1.13.14\n\nEnvironment: …\nTags: …,with_v2ray_api",
+  "users": 3,
+  "active_users": 2,
+  "tokens": 1,
+  "data_dir": "/var/lib/vlessvmore"
+}
+```
+
+`active_users` counts those in the generated config: enabled, unexpired, under quota.
+`sing_box.last_error` appears if the most recent config generation failed.
+
+Check that `sing_box_version` mentions `with_v2ray_api`. Without it there are no
+per-user counters, so usage stays at zero and quotas never trigger.
+
+### `POST /api/reload`
+
+Regenerate and reload. Returns the `sing_box` status object. `500` if the generated
+config was rejected — in which case the running proxy is untouched.
+
+---
+
+## Tokens
+
+### `POST /api/tokens`
+
+```json
+{ "label": "web-ui" }
+```
+
+```json
+{
+  "token": { "id": "t_0B4X…", "label": "web-ui", "created_at": "2026-07-26T02:50:00Z" },
+  "secret": "MHDJWEZ5NQ7K2P8RTX4VYB6CFA3GS1WD"
+}
+```
+
+**`secret` is shown here and never again.** Only its hash is stored, so a leaked
+`tokens.json` cannot be replayed.
+
+### `GET /api/tokens`
+
+Lists tokens with `id`, `label`, `created_at`, `last_used_at` and `revoked_at`. Never
+returns a secret. `last_used_at` is persisted at most once a minute per token, so it can
+lag by that much.
+
+### `DELETE /api/tokens/{id}`
+
+Accepts an id or a label. The token stops working immediately.
+
+---
+
+## Unauthenticated endpoints
+
+### `GET /healthz`
+
+```json
+{ "ok": true }
+```
+
+### `GET /`
+
+`200 OK` with the plain text body `OK`, and nothing that identifies the software.
+
+This exists because Reality's handshake target must be a hostname serving a real TLS
+site. When a reverse proxy fronts this service on that hostname, a visitor has to see
+something unremarkable. Matches only the exact root — unknown paths still `404`.
+
+### `GET /sub/{token}`
+
+See [Subscriptions](#subscriptions) above.

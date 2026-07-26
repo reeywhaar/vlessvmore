@@ -1,0 +1,71 @@
+{
+  "log": {
+    "level": {{json .Config.LogLevel}},
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": {{json .InboundTag}},
+      "listen": "::",
+      "listen_port": {{json .Config.Port}},
+      "users": {{json .Users}},
+      "tls": {
+        "enabled": true,
+        "server_name": {{json .Config.SNI}},
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": {{json .Config.Handshake.Server}},
+            "server_port": {{json .Config.Handshake.ServerPort}}
+          },
+          "private_key": {{json .Identity.PrivateKey}},
+          "short_id": [
+            {{json .Identity.ShortID}}
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "default_domain_resolver": {
+      "server": "local",
+      "strategy": "ipv4_only"
+    },
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "action": "resolve",
+        "strategy": "ipv4_only"
+      }
+    ]
+  },
+  "experimental": {
+    "v2ray_api": {
+      "listen": {{json .StatsListen}},
+      "stats": {
+        "enabled": true,
+        "users": {{json .UserIDs}},
+        "inbounds": [
+          {{json .InboundTag}}
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+/vlessvmore
+/dist/
+/private
+
+# A real deployment's own files, if you run one from this checkout.
+# config/ holds the Reality private key; data/ holds user UUIDs.
+/docker-compose.yml
+/config
+/data

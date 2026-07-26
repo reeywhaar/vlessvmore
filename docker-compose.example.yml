@@ -1,0 +1,90 @@
+# Example deployment, wired for caddy-docker-proxy.
+#
+#   cp docker-compose.example.yml docker-compose.yml
+#
+# then edit the hostname and generate a config:
+#
+#   mkdir -p config data
+#   docker run --rm ghcr.io/reeywhaar/vlessvmore \
+#     init --host vpn.example.com --handshake caddy-caddy-1:443 > config/config.json
+#   docker compose up -d
+#
+# ./config holds no secrets, so it is fine to commit or template. ./data holds all of
+# them — the Reality keypair, user UUIDs, token hashes — so back that up and keep it
+# private. Both are gitignored here.
+#
+# See README.md for the standalone variant without Caddy, and GUIDE.md for a
+# step-by-step walkthrough.
+
+services:
+  vlessvmore:
+    image: ghcr.io/reeywhaar/vlessvmore:latest
+    # To build from this checkout instead:
+    # build: .
+    container_name: vlessvmore
+    restart: unless-stopped
+
+    ports:
+      # The VLESS inbound. The only port that needs to reach the internet
+      # directly. The management API is not published at all — Caddy reaches it
+      # over the shared network below.
+      - "8443:8443"
+
+    volumes:
+      # A directory rather than a single file: room for more than config.json
+      # later, and editing a bind-mounted file in place can break the mount's
+      # inode link. Read-only because nothing in the container writes here.
+      # Restart after editing.
+      - ./config:/etc/vlessvmore:ro
+      # Everything generated and irreplaceable:
+      #   identity.json  the Reality keypair, generated on first start
+      #   users.json     users, quotas, subscription tokens
+      #   tokens.json    API token hashes
+      #   stats.db       traffic history
+      #
+      # This mount is what stops the keypair being regenerated when the container
+      # is recreated. Without it, every client breaks on the next restart —
+      # `vlessvmore serve` logs an error if it ever has to generate a keypair
+      # while users already exist, which is exactly that mistake.
+      - ./data:/var/lib/vlessvmore
+
+    # `status` dials the CLI socket, so it checks the manager and sing-box rather
+    # than just that a port is open. The image sets the same check; this makes it
+    # visible and tunable.
+    healthcheck:
+      test: ["CMD", "vlessvmore", "status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    networks:
+      - caddy
+
+    labels:
+      # caddy-docker-proxy (github.com/lucaslorentz/caddy-docker-proxy) reads
+      # these labels and reconfigures Caddy live.
+      #
+      # This is load-bearing, not decoration. It makes Caddy obtain and serve a
+      # genuine certificate for this hostname, and that certificate is exactly
+      # what Reality's handshake borrows when it forwards non-authenticated
+      # traffic to caddy-caddy-1:443. Without it the handshake target has no
+      # valid cert for the SNI and a probing client sees through the disguise.
+      #
+      # Proxying to our own port 80 means the hostname serves something real:
+      # a browser gets a plain 200, the management API lives under /api behind its
+      # bearer token, and clients fetch their config from /sub/<token>. Nothing is
+      # published to the host for this — Caddy dials the container directly.
+      #
+      # Subscription URLs need to be reachable from the internet, so this label is
+      # what makes them work at all.
+      caddy: vpn.example.com
+      caddy.reverse_proxy: "{{upstreams 80}}"
+      caddy.log.output: stdout
+      caddy.log.format: json
+
+networks:
+  # Created outside this file, shared with the Caddy container:
+  #   docker network create caddy
+  caddy:
+    external: true
