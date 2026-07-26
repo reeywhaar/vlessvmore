@@ -13,6 +13,25 @@ ARG GO_VERSION=1.26
 ARG SINGBOX_GO_VERSION=1.24
 ARG SINGBOX_VERSION=v1.13.14
 
+# Only the tags this deployment actually uses, rather than upstream's default set.
+#
+# The defaults pull in gvisor, quic-go, tailscale, wireguard and — via with_ccm/with_ocm —
+# the Anthropic and OpenAI SDKs, none of which our generated config can reach. Dropping
+# them takes sing-box from 55 MB to 26 MB.
+#
+# What each of these is for:
+#   with_utls        the Reality *server* implementation is behind this tag. Mandatory:
+#                    without it the binary builds and then cannot serve Reality at all.
+#   with_v2ray_api   the per-user traffic counters this whole project is built on.
+#   badlinkname      permits sing-box's //go:linkname into crypto/tls internals.
+#   tfogo_checklinkname0  the same, for the TCP fast-open library.
+#
+# Overridable, so the full upstream set can be restored with
+#   --build-arg SINGBOX_TAGS="$(...DEFAULT_BUILD_TAGS_OTHERS),with_v2ray_api"
+# A sing-box upgrade should re-check this list: a new release could move something we use
+# behind a tag we are not passing.
+ARG SINGBOX_TAGS="with_utls,with_v2ray_api,badlinkname,tfogo_checklinkname0"
+
 # ---------------------------------------------------------------------------
 # sing-box, built with with_v2ray_api.
 #
@@ -25,17 +44,13 @@ ARG SINGBOX_VERSION=v1.13.14
 # target and compiling under QEMU — turns a two minute build of gvisor, quic-go and
 # tailscale into a very long one.
 FROM --platform=$BUILDPLATFORM golang:${SINGBOX_GO_VERSION}-alpine AS singbox
-ARG SINGBOX_VERSION TARGETOS TARGETARCH
+ARG SINGBOX_VERSION SINGBOX_TAGS TARGETOS TARGETARCH
 RUN apk add --no-cache git
 RUN git clone --depth 1 -b "${SINGBOX_VERSION}" https://github.com/SagerNet/sing-box /src
 WORKDIR /src
-# The upstream default tag set plus with_v2ray_api. Reading the tags from the
-# checkout rather than hardcoding them means a version bump picks up whatever
-# upstream considers default, instead of silently dropping a feature.
-RUN TAGS="$(cat release/DEFAULT_BUILD_TAGS_OTHERS),with_v2ray_api" && \
-    echo "building sing-box ${SINGBOX_VERSION} for ${TARGETOS}/${TARGETARCH} with tags: $TAGS" && \
+RUN echo "building sing-box ${SINGBOX_VERSION} for ${TARGETOS}/${TARGETARCH} with tags: ${SINGBOX_TAGS}" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -v -trimpath -tags "$TAGS" \
+    go build -v -trimpath -tags "${SINGBOX_TAGS}" \
       -ldflags "-s -w -buildid= -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION#v}" \
       -o /out/sing-box ./cmd/sing-box
 # Fail the build here, not in production. A missing tag is otherwise invisible until an
@@ -61,7 +76,7 @@ COPY main.go ./
 COPY internal ./internal
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
-      -ldflags "-s -w -X vlessvmore/internal/cli.Version=${VERSION}" \
+      -ldflags "-s -w -buildid= -X vlessvmore/internal/cli.Version=${VERSION}" \
       -o /out/vlessvmore .
 
 # ---------------------------------------------------------------------------

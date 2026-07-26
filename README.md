@@ -302,9 +302,12 @@ for `linux/amd64` and `linux/arm64`, after `go vet` and the test suite pass. Onl
 is tagged, so the commit is embedded at build time instead — `vlessvmore version` reports
 it.
 
-The image builds sing-box itself with the upstream default tags plus `with_v2ray_api`,
-and fails the build if that tag is missing rather than letting you discover it later from
-traffic stuck at zero. Confirm any image with:
+The image builds sing-box itself, with only the build tags this deployment uses — see
+`SINGBOX_TAGS` in the [Dockerfile](Dockerfile). Upstream's default set adds gvisor,
+quic-go, tailscale, wireguard and the Anthropic and OpenAI SDKs, none of which the
+generated config can reach; leaving them out takes sing-box from 55 MB to 26 MB and the
+image from 118 MB to 78 MB. The build fails if `with_v2ray_api` is missing rather than
+letting you discover it later from traffic stuck at zero. Confirm any image with:
 
 ```sh
 docker run --rm --entrypoint sing-box vlessvmore:dev version
