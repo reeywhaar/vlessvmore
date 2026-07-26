@@ -32,11 +32,24 @@ type Dump struct {
 	// a silent, baffling failure. Its presence is why a dump is a secret.
 	Identity *Identity `json:"identity,omitempty"`
 
-	Users  []User  `json:"users"`
-	Tokens []Token `json:"tokens"`
+	// Users is always present, as an array — never null. It is the one section every
+	// dump has, so a consumer should not have to handle its absence.
+	Users []User `json:"users"`
 
-	// Usage is omitted by an export that only needs to move accounts.
-	Usage []Row `json:"usage,omitempty"`
+	// Tokens and Usage are pointers so the three states an import needs stay
+	// distinguishable in JSON:
+	//
+	//	absent  → not exported; leave whatever the destination has alone
+	//	[]      → exported and empty; replace the destination's with nothing
+	//	[...]   → exported; replace
+	//
+	// A plain slice cannot express that. `omitempty` treats empty and nil the same, so
+	// exporting a deployment that happens to have zero tokens would look identical to not
+	// exporting tokens at all — and a --force restore would then leave the destination's
+	// old API credentials in place instead of clearing them. Without `omitempty` the field
+	// marshals as `null` when unset, which is the same ambiguity spelled differently.
+	Tokens *[]Token `json:"tokens,omitempty"`
+	Usage  *[]Row   `json:"usage,omitempty"`
 }
 
 // ExportOptions controls what an export includes.
@@ -56,24 +69,37 @@ type ExportOptions struct {
 
 // Export gathers the current state.
 func (s *Store) Export(ctx context.Context, now time.Time, opts ExportOptions) (*Dump, error) {
+	users := s.Users.List()
+	if users == nil {
+		// slices.Clone returns nil for an empty list, which would marshal as
+		// `"users": null`. An empty array is the honest encoding.
+		users = []User{}
+	}
 	d := &Dump{
 		Version:    DumpVersion,
 		ExportedAt: now.UTC().Truncate(time.Second),
-		Users:      s.Users.List(),
+		Users:      users,
 	}
 	if !opts.ExcludeIdentity {
 		id := s.Identity.Get()
 		d.Identity = &id
 	}
 	if opts.IncludeTokens {
-		d.Tokens = s.Tokens.List()
+		tokens := s.Tokens.List()
+		if tokens == nil {
+			tokens = []Token{}
+		}
+		d.Tokens = &tokens
 	}
 	if opts.IncludeUsage {
 		rows, err := s.Usage.Export(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("export usage: %w", err)
 		}
-		d.Usage = rows
+		if rows == nil {
+			rows = []Row{}
+		}
+		d.Usage = &rows
 	}
 	return d, nil
 }
@@ -106,9 +132,11 @@ func ReadDump(r io.Reader) (*Dump, error) {
 	for _, u := range d.Users {
 		known[u.ID] = true
 	}
-	for _, r := range d.Usage {
-		if !known[r.UserID] {
-			return nil, fmt.Errorf("dump has usage for unknown user %q", r.UserID)
+	if d.Usage != nil {
+		for _, r := range *d.Usage {
+			if !known[r.UserID] {
+				return nil, fmt.Errorf("dump has usage for unknown user %q", r.UserID)
+			}
 		}
 	}
 	return &d, nil
@@ -140,12 +168,12 @@ func (s *Store) Import(ctx context.Context, d *Dump, force bool) error {
 		return fmt.Errorf("import users: %w", err)
 	}
 	if d.Tokens != nil {
-		if err := s.Tokens.Replace(d.Tokens); err != nil {
+		if err := s.Tokens.Replace(*d.Tokens); err != nil {
 			return fmt.Errorf("import tokens: %w", err)
 		}
 	}
 	if d.Usage != nil {
-		if err := s.Usage.Import(ctx, d.Usage); err != nil {
+		if err := s.Usage.Import(ctx, *d.Usage); err != nil {
 			return fmt.Errorf("import usage: %w", err)
 		}
 	}

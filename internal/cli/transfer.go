@@ -55,10 +55,10 @@ Runs directly against the data directory, so it works whether or not the daemon 
 
 			fmt.Fprintf(cmd.ErrOrStderr(), "exported %d user(s)", len(dump.Users))
 			if opts.IncludeTokens {
-				fmt.Fprintf(cmd.ErrOrStderr(), ", %d token(s)", len(dump.Tokens))
+				fmt.Fprintf(cmd.ErrOrStderr(), ", %d token(s)", len(*dump.Tokens))
 			}
 			if opts.IncludeUsage {
-				fmt.Fprintf(cmd.ErrOrStderr(), ", %d usage bucket(s)", len(dump.Usage))
+				fmt.Fprintf(cmd.ErrOrStderr(), ", %d usage bucket(s)", len(*dump.Usage))
 			}
 			fmt.Fprintln(cmd.ErrOrStderr())
 			return nil
@@ -123,10 +123,10 @@ reach the sing-box config.`,
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "imported %d user(s)", len(dump.Users))
 			if dump.Tokens != nil {
-				fmt.Fprintf(out, ", %d token(s)", len(dump.Tokens))
+				fmt.Fprintf(out, ", %d token(s)", len(*dump.Tokens))
 			}
 			if dump.Usage != nil {
-				fmt.Fprintf(out, ", %d usage bucket(s)", len(dump.Usage))
+				fmt.Fprintf(out, ", %d usage bucket(s)", len(*dump.Usage))
 			}
 			fmt.Fprintf(out, "\nrun `vlessvmore reload` (or restart) to apply them\n")
 			return nil

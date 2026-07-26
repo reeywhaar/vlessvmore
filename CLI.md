@@ -411,10 +411,13 @@ UUID.
 Safe to run on a live service, and the supported way to back up: copying `data/` by hand
 can capture a torn `stats.db`, since it is SQLite in WAL mode.
 
-`import` refuses a data directory that already has users unless given `--force`. Sections
-absent from a dump are left alone — importing a dump with no identity keeps the
-destination's own key, and a users-only export does not wipe usage history. Run `reload`
-afterwards to apply the imported users.
+`import` refuses a data directory that already has users unless given `--force`.
+
+A section **absent** from a dump is left alone; a section present but **empty** (`[]`) is
+applied, clearing the destination's. So a users-only export does not wipe usage history,
+while `export --all` from a deployment with no tokens does clear the destination's tokens
+on restore — which is what you want, or old API credentials would outlive the backup they
+were restored over. Run `reload` afterwards to apply the imported users.
 
 ### `serve`
 
