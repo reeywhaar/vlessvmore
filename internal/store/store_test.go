@@ -921,3 +921,49 @@ func TestOpenRejectsDuplicateSubTokens(t *testing.T) {
 		t.Error("Open accepted duplicate sub tokens")
 	}
 }
+
+// Every slice that reaches a JSON response has to be non-nil when empty, or it encodes as
+// `null` and every client has to guard for it. The empty case is not exotic: a fresh node
+// has no tokens and no users, and every user has no traffic until they send some.
+//
+// Asserting on the returned slice rather than on marshalled bytes is deliberate — this is
+// the invariant at its source, and the API package has its own test on the wire format.
+func TestEmptyCollectionsAreNotNil(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+
+	if got := s.Users.List(); got == nil {
+		t.Error("Users.List() is nil on a fresh store; it marshals as null")
+	}
+	if got := s.Tokens.List(); got == nil {
+		t.Error("Tokens.List() is nil on a fresh store; it marshals as null")
+	}
+
+	u, err := s.Users.Create(CreateParams{Name: "alice"}, time.Now())
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	now := time.Now()
+	series, err := s.Usage.Series(ctx, u.ID, now.Add(-24*time.Hour), now, time.Hour)
+	if err != nil {
+		t.Fatalf("series: %v", err)
+	}
+	if series == nil {
+		t.Error("Usage.Series() is nil for a user with no traffic; it marshals as null")
+	}
+
+	rows, err := s.Usage.Export(ctx)
+	if err != nil {
+		t.Fatalf("export usage: %v", err)
+	}
+	if rows == nil {
+		t.Error("Usage.Export() is nil with no traffic recorded; it marshals as null")
+	}
+
+	// Non-empty must keep working too — a fix that always returns an empty slice would
+	// pass everything above.
+	if got := s.Users.List(); len(got) != 1 {
+		t.Errorf("Users.List() returned %d users, want 1", len(got))
+	}
+}

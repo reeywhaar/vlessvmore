@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -565,4 +566,63 @@ func TestMethodMismatchIs404(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
+}
+
+// A Go nil slice marshals to `null`, not `[]`, and every one of these responses is
+// reachable in a completely ordinary state: a fresh node has no tokens, a new user has no
+// traffic. A client doing the obvious `for (const p of series)` then throws, naming
+// nothing an operator can act on.
+//
+// The reason this is easy to reintroduce is that a test written the natural way asserts
+// on the decoded value, where nil and [] both look like an empty slice. This one looks at
+// the bytes.
+func TestEmptyCollectionsMarshalAsArrays(t *testing.T) {
+	s, _ := testServer(t)
+
+	// A fresh node: no users and no tokens at all.
+	for _, path := range []string{"/api/users", "/api/tokens"} {
+		t.Run(path, func(t *testing.T) {
+			assertNoJSONNulls(t, do(t, s, "GET", path, "").Body.Bytes())
+		})
+	}
+
+	// A user who has never sent a byte — which is every user, immediately after creation.
+	do(t, s, "POST", "/api/users", `{"name":"alice"}`)
+	for _, path := range []string{
+		"/api/users/alice",
+		"/api/users/alice/usage",
+		"/api/users/alice/usage?bucket=day",
+		"/api/users/alice/link",
+	} {
+		t.Run(path, func(t *testing.T) {
+			assertNoJSONNulls(t, do(t, s, "GET", path, "").Body.Bytes())
+		})
+	}
+}
+
+// assertNoJSONNulls fails for any null anywhere in the document, naming its path. No field
+// in these responses is legitimately null: the optional ones are all `omitempty`, so they
+// are absent rather than present-and-null.
+func assertNoJSONNulls(t *testing.T, body []byte) {
+	t.Helper()
+	var doc any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("decoding response: %v\n%s", err, body)
+	}
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch x := v.(type) {
+		case nil:
+			t.Errorf("%s is null; an empty collection must marshal as []\n%s", path, body)
+		case map[string]any:
+			for k, kv := range x {
+				walk(path+"."+k, kv)
+			}
+		case []any:
+			for i, iv := range x {
+				walk(fmt.Sprintf("%s[%d]", path, i), iv)
+			}
+		}
+	}
+	walk("$", doc)
 }

@@ -233,7 +233,10 @@ ORDER BY slot`, secs, secs, userID, Bucket(from), Bucket(to)+BucketSeconds)
 	}
 	defer rows.Close()
 
-	var out []Point
+	// Non-nil even with no rows: this goes straight into a JSON response, and a nil
+	// slice marshals as `null` rather than `[]`. Every user has no traffic at first, so
+	// the empty case is the common one, not an edge case.
+	out := make([]Point, 0)
 	for rows.Next() {
 		var slot int64
 		var p Point
@@ -277,7 +280,9 @@ func (u *Usage) Export(ctx context.Context) ([]Row, error) {
 	}
 	defer rows.Close()
 
-	var out []Row
+	// Non-nil even with no rows, for the same reason as Series: this ends up in a JSON
+	// dump, where a nil slice is `null` and an empty one is `[]`.
+	out := make([]Row, 0)
 	for rows.Next() {
 		var r Row
 		if err := rows.Scan(&r.UserID, &r.Bucket, &r.Up, &r.Down); err != nil {

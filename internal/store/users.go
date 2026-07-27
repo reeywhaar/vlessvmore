@@ -173,7 +173,10 @@ func (s *Users) Path() string { return s.path }
 func (s *Users) List() []User {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return slices.Clone(s.list)
+	// Not slices.Clone: it returns nil for a nil input, and this is marshalled straight
+	// into a JSON response where a nil slice becomes `null` rather than `[]`. A fresh
+	// node has an empty list, so that is the first thing a caller ever sees.
+	return append(make([]User, 0, len(s.list)), s.list...)
 }
 
 // Get resolves a reference that may be an internal id or a display name. Names are

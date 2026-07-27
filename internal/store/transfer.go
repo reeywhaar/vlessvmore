@@ -69,16 +69,13 @@ type ExportOptions struct {
 
 // Export gathers the current state.
 func (s *Store) Export(ctx context.Context, now time.Time, opts ExportOptions) (*Dump, error) {
-	users := s.Users.List()
-	if users == nil {
-		// slices.Clone returns nil for an empty list, which would marshal as
-		// `"users": null`. An empty array is the honest encoding.
-		users = []User{}
-	}
+	// The three sources below each guarantee a non-nil slice, which is what keeps an
+	// empty section encoding as `[]` rather than `null`. That invariant lives with each
+	// of them; re-checking it here would only hide a regression at the source.
 	d := &Dump{
 		Version:    DumpVersion,
 		ExportedAt: now.UTC().Truncate(time.Second),
-		Users:      users,
+		Users:      s.Users.List(),
 	}
 	if !opts.ExcludeIdentity {
 		id := s.Identity.Get()
@@ -86,18 +83,12 @@ func (s *Store) Export(ctx context.Context, now time.Time, opts ExportOptions) (
 	}
 	if opts.IncludeTokens {
 		tokens := s.Tokens.List()
-		if tokens == nil {
-			tokens = []Token{}
-		}
 		d.Tokens = &tokens
 	}
 	if opts.IncludeUsage {
 		rows, err := s.Usage.Export(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("export usage: %w", err)
-		}
-		if rows == nil {
-			rows = []Row{}
 		}
 		d.Usage = &rows
 	}

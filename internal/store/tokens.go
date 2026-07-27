@@ -91,7 +91,10 @@ func HashSecret(secret string) string {
 func (s *Tokens) List() []Token {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return slices.Clone(s.list)
+	// Not slices.Clone: it returns nil for a nil input, and this is marshalled straight
+	// into a JSON response where a nil slice becomes `null` rather than `[]`. A fresh
+	// node has an empty list, so that is the first thing a caller ever sees.
+	return append(make([]Token, 0, len(s.list)), s.list...)
 }
 
 // Create mints a token and returns it alongside the secret, which is the only time
