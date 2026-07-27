@@ -209,11 +209,12 @@ mid-hour includes that whole hour.
 
 ### `GET /api/users/{id}/link`
 
-The `vless://` URI, both user-facing URLs, and the URI as a QR bit matrix.
+The `vless://` URI, both user-facing URLs, and a QR bit matrix for each of the two things
+worth scanning.
 
 | query | effect |
 | --- | --- |
-| `qr=false` | omit the `qr` object |
+| `qr=false` | omit both matrices |
 
 ```json
 {
@@ -226,9 +227,19 @@ The `vless://` URI, both user-facing URLs, and the URI as a QR bit matrix.
     "size": 57,
     "rows": ["101110100…", "100000101…"],
     "quiet_zone": 4
+  },
+  "subscription_qr": {
+    "size": 33,
+    "rows": ["111111101…", "100000101…"],
+    "quiet_zone": 4
   }
 }
 ```
+
+`qr` encodes `link`, `subscription_qr` encodes `subscription_url`. Prefer showing the
+second: a scanned subscription re-fetches, so it survives a key rotation or a changed
+port, while a scanned link is frozen at the moment it was drawn. `subscription_qr` is
+absent for a user with no subscription token.
 
 `rows` has `size` entries, each a `size`-character string of `'0'` (light) and `'1'`
 (dark), top row first. The matrix is always square.

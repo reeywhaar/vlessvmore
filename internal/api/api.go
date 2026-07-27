@@ -511,9 +511,9 @@ func (s *Server) userLink(w http.ResponseWriter, r *http.Request) {
 		InstallURL:      s.ShowURL(u),
 	}
 
-	// The QR matrix is included by default: a caller asking for a link is almost
+	// The QR matrices are included by default: a caller asking for a link is almost
 	// always about to show it to someone with a phone. `?qr=false` opts out for
-	// callers that only want the URI.
+	// callers that only want the URIs.
 	if r.URL.Query().Get("qr") != "false" {
 		code, err := link.Encode(uri)
 		if err != nil {
@@ -521,18 +521,36 @@ func (s *Server) userLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp.QR = code
+
+		// The subscription gets its own, and it is the one to prefer: a scanned
+		// subscription re-fetches, so it survives a key rotation or a changed port,
+		// while a scanned link is frozen at the moment it was drawn. Absent only for
+		// a user with no subscription token.
+		if resp.SubscriptionURL != "" {
+			subCode, err := link.Encode(resp.SubscriptionURL)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			resp.SubscriptionQR = subCode
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// LinkResponse is a user's connection URI, plus the same thing as a QR matrix.
+// LinkResponse is a user's connection URI and subscription URL, each also as a QR matrix.
 type LinkResponse struct {
-	UserID          string   `json:"user_id"`
-	Name            string   `json:"name"`
-	Link            string   `json:"link"`
-	SubscriptionURL string   `json:"subscription_url,omitempty"`
-	InstallURL      string   `json:"install_url,omitempty"`
-	QR              *link.QR `json:"qr,omitempty"`
+	UserID          string `json:"user_id"`
+	Name            string `json:"name"`
+	Link            string `json:"link"`
+	SubscriptionURL string `json:"subscription_url,omitempty"`
+	InstallURL      string `json:"install_url,omitempty"`
+
+	// QR encodes Link, SubscriptionQR encodes SubscriptionURL. Two fields rather than
+	// one switched by a query parameter: a caller drawing both — "scan this to connect
+	// now, or this to subscribe" — should not have to ask twice.
+	QR             *link.QR `json:"qr,omitempty"`
+	SubscriptionQR *link.QR `json:"subscription_qr,omitempty"`
 }
 
 // rotateSubToken issues a new subscription URL, invalidating the old one. The user's

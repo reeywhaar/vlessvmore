@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vlessvmore/internal/config"
+	"vlessvmore/internal/link"
 	"vlessvmore/internal/singbox"
 	"vlessvmore/internal/store"
 )
@@ -405,6 +406,53 @@ func TestUserLinkIncludesQRMatrix(t *testing.T) {
 	if plain.Link != got.Link {
 		t.Error("the link itself should not depend on the qr parameter")
 	}
+}
+
+// The subscription URL is the one to hand out, so it needs a scannable form too — and it
+// has to be its own matrix, not the link's.
+func TestUserLinkIncludesSubscriptionQR(t *testing.T) {
+	s, _ := testServer(t)
+	do(t, s, "POST", "/api/users", `{"name":"alice"}`)
+
+	got := decodeBody[LinkResponse](t, do(t, s, "GET", "/api/users/alice/link", ""))
+	if got.SubscriptionQR == nil {
+		t.Fatal("subscription_qr missing")
+	}
+	if got.SubscriptionURL == "" {
+		t.Fatal("no subscription URL to encode")
+	}
+	if got.SubscriptionQR.Size <= 0 || len(got.SubscriptionQR.Rows) != got.SubscriptionQR.Size {
+		t.Fatalf("subscription qr is not square: size=%d rows=%d",
+			got.SubscriptionQR.Size, len(got.SubscriptionQR.Rows))
+	}
+	for i, row := range got.SubscriptionQR.Rows {
+		if len(row) != got.SubscriptionQR.Size {
+			t.Fatalf("subscription qr row %d has width %d, want %d",
+				i, len(row), got.SubscriptionQR.Size)
+		}
+	}
+	// A vless:// URI and a subscription URL are different lengths, so encoding the wrong
+	// one would be easy to miss without comparing.
+	if equalQR(got.QR, got.SubscriptionQR) {
+		t.Error("subscription_qr is the same matrix as qr; one of them encodes the wrong string")
+	}
+
+	plain := decodeBody[LinkResponse](t, do(t, s, "GET", "/api/users/alice/link?qr=false", ""))
+	if plain.SubscriptionQR != nil {
+		t.Error("qr=false should omit the subscription matrix too")
+	}
+}
+
+func equalQR(a, b *link.QR) bool {
+	if a == nil || b == nil || a.Size != b.Size {
+		return false
+	}
+	for i := range a.Rows {
+		if a.Rows[i] != b.Rows[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // GET /api/server is the endpoint most likely to leak the private key by accident,
