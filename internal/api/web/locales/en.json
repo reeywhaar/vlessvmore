@@ -1,0 +1,65 @@
+{
+  "code": "en",
+  "name": "English",
+
+  "title": "Set up your connection",
+  "subtitle": "Three steps, about two minutes.",
+
+  "step_install": "Install the app",
+  "step_install_body": "Hiddify is free and open source.",
+  "store_button": "Get Hiddify",
+  "direct_button": "Download the APK instead",
+
+  "step_add": "Add your profile",
+  "step_add_body": "With the app installed, tap the button below. Hiddify opens with your profile ready to save.",
+  "add_button": "Add to Hiddify",
+
+  "manual_title": "Nothing happened?",
+  "manual_body": "Copy the link, open Hiddify, tap + in the top right, then tap Clipboard.",
+  "copy_button": "Copy link",
+  "copied_label": "Copied",
+
+  "qr_title": "Reading this on a computer?",
+  "qr_body": "In Hiddify on your phone, tap + then Scan QR, and point it at this code.",
+
+  "step_connect": "Connect",
+  "step_connect_body": "Tap the big button in the middle.",
+
+  "step_done": "That's it",
+  "step_done_body": "Green means you are connected. Tap the same button again to stop.",
+
+  "account_title": "Your account",
+  "account_name": "Name",
+  "account_used": "Used",
+  "account_quota": "Limit",
+  "account_expires": "Expires",
+  "account_status": "Status",
+  "status_active": "Active",
+  "status_disabled": "Turned off",
+  "status_expired": "Expired",
+  "status_over_quota": "Limit reached",
+  "unlimited": "No limit",
+  "never": "Never",
+
+  "language_label": "Language",
+  "device_label": "Device",
+
+  "platforms": {
+    "ios": {
+      "label": "iPhone",
+      "install": "Install Hiddify from the App Store."
+    },
+    "android": {
+      "label": "Android",
+      "install": "Install Hiddify from Google Play, or download it directly if the store is unavailable."
+    }
+  },
+
+  "shots": {
+    "add-plus": "Hiddify's home screen, with the plus button in the top right marked",
+    "add-clipboard": "Hiddify's add-profile sheet, with the Clipboard button marked",
+    "add-qr": "Hiddify's add-profile sheet, with the Scan QR button marked",
+    "connect": "Hiddify with a profile loaded, with the round connect button marked",
+    "connected": "Hiddify showing a connected profile in green"
+  }
+}

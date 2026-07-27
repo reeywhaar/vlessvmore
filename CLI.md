@@ -35,6 +35,7 @@ vlessvmore user set <name|id>       # change name, quota, expiry, note, enabled 
 vlessvmore user rm <name|id>        # delete the user and their usage history (asks first)
 vlessvmore user link <name|id>      # print just the vless:// URI, for piping
 vlessvmore user sub <name|id>       # print the subscription URL — prefer this
+vlessvmore user install <name|id>   # print the setup page URL — prefer this for people
 vlessvmore user rotate-sub <name|id>    # invalidate a leaked subscription URL
 vlessvmore user usage <name|id>     # traffic history, hourly or daily
 vlessvmore user reset-usage <name|id>   # start a new quota window; un-disables a capped user
@@ -83,7 +84,7 @@ terminal, and stay quiet when piped or redirected. `--qr` / `--qr=false` overrid
 guess either way. The code encodes the **subscription URL**, not the static link, so a
 scanned profile keeps working through a key rotation or a port change.
 
-`user link` and `user sub` never draw one by default, so
+`user link`, `user sub` and `user install` never draw one by default, so
 `LINK=$(vlessvmore user link alice)` captures exactly the URI; pass `--qr` if you want
 the code as well.
 
@@ -186,9 +187,27 @@ remaining in its own UI.
 The URL is a capability: it needs no password, so anyone holding it can fetch the
 credential. Treat it exactly as carefully as the link itself.
 
+### `user install <name|id>`
+
+Prints the setup page URL and nothing else. Aliased as `user page`.
+
+```sh
+vlessvmore user install alice
+vlessvmore user install alice --qr
+```
+
+**Send this to a person; send `user sub` to a machine.** The page walks them through
+installing Hiddify, adding the profile with one tap, and connecting, with screenshots — in
+their own language and for their own phone, both guessed from the browser and switchable.
+It shows their traffic and expiry too, so "how much have I used?" answers itself.
+
+It carries the same subscription token, so it is exactly as sensitive, and `rotate-sub`
+invalidates both at once.
+
 ### `user rotate-sub <name|id>`
 
-Issues a new subscription URL. The old one stops working immediately.
+Issues a new subscription URL. The old one stops working immediately, and so does the
+setup page on it.
 
 The user's UUID is untouched, so an already-configured client keeps connecting — this cuts
 off a leaked URL without disconnecting anyone. They will need the new URL to keep

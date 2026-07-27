@@ -14,6 +14,7 @@ state              enabled
 quota              unlimited
 expires            never
 subscription       https://vpn.example.com/sub/QK7M2X…
+install page       https://vpn.example.com/show/QK7M2X…
 
 vless://8f1c…@vpn.example.com:8443?type=tcp&encryption=none&flow=xtls-rprx-vision&…#alice
 
@@ -161,6 +162,7 @@ token. To keep it off the internet entirely, drop the `caddy.reverse_proxy` labe
 docker exec vlessvmore vlessvmore user add alice        # unlimited, never expires
 docker exec vlessvmore vlessvmore user ls
 docker exec vlessvmore vlessvmore user sub alice        # subscription URL
+docker exec vlessvmore vlessvmore user install alice    # setup page to send a person
 docker exec vlessvmore vlessvmore user usage alice --days 30
 docker exec vlessvmore vlessvmore status
 ```
@@ -176,6 +178,11 @@ Hand out the **subscription URL**, not the raw link. Clients re-fetch it, so the
 a rotated key, a changed port or an exhausted quota on their own; a pasted `vless://`
 link is frozen at the moment you copied it. The response also carries usage and expiry
 headers, which is what makes a client display quota remaining in its own UI.
+
+For a person rather than a program, send `user install` instead. It is a setup page on the
+same token: install Hiddify, add the profile with one tap, connect — with screenshots, in
+their language, for their phone, both guessed from the browser and switchable. It shows
+them their own traffic and expiry too. Nothing to talk anyone through.
 
 Full command reference, including quota and date formats, in **[CLI.md](CLI.md)**.
 HTTP endpoints in **[API.md](API.md)**.
@@ -290,8 +297,9 @@ status`, which goes over the socket, so point any external HTTP check at `GET /`
 
 **Subscription URLs are capabilities.** Anyone holding one can fetch that user's
 credential — no header, no password. They are exactly as sensitive as the link itself.
-`user rotate-sub` invalidates a leaked URL without disconnecting the user, since their
-UUID is untouched.
+The setup page at `/show/<token>` and its assets at `/static/…?token=` ride the same
+capability, and without it they are the same `404` as everything else. `user rotate-sub`
+invalidates all of them without disconnecting the user, since their UUID is untouched.
 
 **Rotating the server key is a hard cutover.** sing-box accepts exactly one private key
 per inbound, so there is no overlap window: `identity set --regenerate` invalidates every

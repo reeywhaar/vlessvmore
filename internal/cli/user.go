@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"vlessvmore/internal/api"
+	"vlessvmore/internal/bytesize"
 )
 
 func newUserCmd() *cobra.Command {
@@ -28,6 +29,7 @@ func newUserCmd() *cobra.Command {
 		newUserUsageCmd(),
 		newUserResetUsageCmd(),
 		newUserSubCmd(),
+		newUserInstallCmd(),
 		newUserRotateSubCmd(),
 	)
 	return cmd
@@ -68,7 +70,7 @@ func newUserAddCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := api.CreateUserRequest{Name: args[0], UUID: uuid, Note: note}
 			if quota != "" {
-				n, err := ParseBytes(quota)
+				n, err := bytesize.Parse(quota)
 				if err != nil {
 					return fmt.Errorf("--quota: %w", err)
 				}
@@ -157,9 +159,9 @@ func newUserListCmd() *cobra.Command {
 			for _, u := range resp.Users {
 				used, quota := "-", "unlimited"
 				if u.Usage != nil {
-					used = FormatBytes(u.Usage.WindowTotal)
+					used = bytesize.Format(u.Usage.WindowTotal)
 					if u.QuotaBytes > 0 {
-						quota = FormatBytes(u.QuotaBytes)
+						quota = bytesize.Format(u.QuotaBytes)
 					}
 				}
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -254,7 +256,7 @@ Pass --expires "" to remove an expiry, and --quota 0 to make a user unlimited.`,
 				body["note"] = note
 			}
 			if f.Changed("quota") {
-				n, err := ParseBytes(quota)
+				n, err := bytesize.Parse(quota)
 				if err != nil {
 					return fmt.Errorf("--quota: %w", err)
 				}
@@ -427,16 +429,16 @@ func newUserUsageCmd() *cobra.Command {
 				fmt.Fprintln(tw, "WHEN\tUP\tDOWN\tTOTAL")
 				for _, p := range resp.Series {
 					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Bucket.Format(layout),
-						FormatBytes(p.Up), FormatBytes(p.Down), FormatBytes(p.Up+p.Down))
+						bytesize.Format(p.Up), bytesize.Format(p.Down), bytesize.Format(p.Up+p.Down))
 				}
 				tw.Flush()
 			}
-			fmt.Fprintf(out, "\nsince quota reset  %s\n", FormatBytes(resp.Summary.WindowTotal))
+			fmt.Fprintf(out, "\nsince quota reset  %s\n", bytesize.Format(resp.Summary.WindowTotal))
 			if resp.Summary.QuotaBytes > 0 {
 				fmt.Fprintf(out, "quota              %s (%s remaining)\n",
-					FormatBytes(resp.Summary.QuotaBytes), FormatBytes(resp.Summary.QuotaRemaining))
+					bytesize.Format(resp.Summary.QuotaBytes), bytesize.Format(resp.Summary.QuotaRemaining))
 			}
-			fmt.Fprintf(out, "lifetime           %s\n", FormatBytes(resp.Summary.Total))
+			fmt.Fprintf(out, "lifetime           %s\n", bytesize.Format(resp.Summary.Total))
 			return nil
 		},
 	}
@@ -507,6 +509,45 @@ the link itself. ` + "`user rotate-sub`" + ` invalidates it without disturbing t
 	return cmd
 }
 
+func newUserInstallCmd() *cobra.Command {
+	var qr bool
+	cmd := &cobra.Command{
+		Use:   "install <name|id>",
+		Short: "Print a user's install page URL",
+		Long: `Print the URL of the illustrated setup page to send to a user.
+
+The page walks them through installing Hiddify, adding their profile with one tap, and
+connecting, in their own language and for their own phone. It shows their traffic and
+expiry too, so "how much have I used?" answers itself.
+
+Send this rather than a bare subscription URL when the person on the other end has not
+done it before. It carries the same subscription token, so it is exactly as sensitive,
+and ` + "`user rotate-sub`" + ` invalidates both at once.`,
+		Aliases:      []string{"page"},
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var u api.UserResponse
+			if err := client(cmd).Do(cmd.Context(), "GET", "/api/users/"+args[0], nil, &u); err != nil {
+				return err
+			}
+			if u.InstallURL == "" {
+				return fmt.Errorf("user %q has no subscription token", u.Name)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), u.InstallURL)
+			// Stderr, so the QR never lands in `URL=$(vlessvmore user install alice)`.
+			if qr {
+				errOut := cmd.ErrOrStderr()
+				fmt.Fprintln(errOut)
+				printQR(errOut, u.InstallURL)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&qr, "qr", true, "draw a QR code; --qr=false to suppress it")
+	return cmd
+}
+
 func newUserRotateSubCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rotate-sub <name|id>",
@@ -556,17 +597,20 @@ func printUserDetail(w io.Writer, u api.UserResponse) {
 	fmt.Fprintf(tw, "uuid\t%s\n", u.UUID)
 	fmt.Fprintf(tw, "state\t%s\n", userState(u))
 	if u.QuotaBytes > 0 {
-		fmt.Fprintf(tw, "quota\t%s\n", FormatBytes(u.QuotaBytes))
+		fmt.Fprintf(tw, "quota\t%s\n", bytesize.Format(u.QuotaBytes))
 	} else {
 		fmt.Fprintf(tw, "quota\tunlimited\n")
 	}
 	fmt.Fprintf(tw, "expires\t%s\n", expiryText(u))
 	if u.Usage != nil {
-		fmt.Fprintf(tw, "used (window)\t%s\n", FormatBytes(u.Usage.WindowTotal))
-		fmt.Fprintf(tw, "used (lifetime)\t%s\n", FormatBytes(u.Usage.Total))
+		fmt.Fprintf(tw, "used (window)\t%s\n", bytesize.Format(u.Usage.WindowTotal))
+		fmt.Fprintf(tw, "used (lifetime)\t%s\n", bytesize.Format(u.Usage.Total))
 	}
 	if u.SubscriptionURL != "" {
 		fmt.Fprintf(tw, "subscription\t%s\n", u.SubscriptionURL)
+	}
+	if u.InstallURL != "" {
+		fmt.Fprintf(tw, "install page\t%s\n", u.InstallURL)
 	}
 	fmt.Fprintf(tw, "quota window from\t%s\n", u.UsageResetAt.Format(time.RFC3339))
 	if u.Note != "" {

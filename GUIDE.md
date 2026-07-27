@@ -201,6 +201,7 @@ state              enabled
 quota              unlimited
 expires            never
 subscription       https://vpn.example.com/sub/QK7M2X...
+install page       https://vpn.example.com/show/QK7M2X...
 
 vless://268e4039-...@vpn.example.com:8443?type=tcp&encryption=none&...#alice
 
@@ -237,6 +238,20 @@ Android, iOS, Windows, macOS and Linux.
 
 Other sing-box-based clients work the same way. Avoid Xray-based clients for the first
 test — Reality differs subtly between cores, and you want to rule that out.
+
+**Send them a link — easiest**
+
+```sh
+docker exec vlessvmore vlessvmore user install alice
+```
+
+That prints a setup page URL. Send it to whoever the account is for and they are done
+without you: the page installs Hiddify, adds the profile with one tap, and shows them
+their own traffic and expiry afterwards. It picks their language and phone from the
+browser, and both are switchable if it guesses wrong.
+
+The URL carries the same subscription token, so treat it as carefully as the subscription
+URL itself — `user rotate-sub` invalidates both together.
 
 **On a phone — scan the code**
 

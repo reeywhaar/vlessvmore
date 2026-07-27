@@ -1,0 +1,312 @@
+/* Mobile first: this page is opened on a phone, usually once. */
+
+/* Panes are switched with the hidden attribute, and a display rule below would quietly
+   win against it. Everything else here depends on this line. */
+[hidden] {
+  display: none !important;
+}
+
+:root {
+  --bg: #f7f7f9;
+  --card: #fff;
+  --ink: #16161a;
+  --muted: #6b6b76;
+  --line: #e2e2e8;
+  --accent: #699e6c;
+  --accent-ink: #fff;
+  --ok: #2f8a3e;
+  --warn: #b3541e;
+  --radius: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131317;
+    --card: #1c1c22;
+    --ink: #ececf1;
+    --muted: #9a9aa6;
+    --line: #2c2c35;
+    --accent: #8f8fdc;
+    --accent-ink: #14141a;
+    --ok: #6fd07f;
+    --warn: #e0a06a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem 1rem 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    16px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+main {
+  max-width: 34rem;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.1rem;
+}
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+.lede {
+  margin-bottom: 1.25rem;
+  color: var(--muted);
+}
+
+/* Segmented controls */
+
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.seg {
+  display: flex;
+  padding: 3px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.seg button {
+  min-height: 38px;
+  padding: 0 0.95rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* Steps */
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps > li {
+  position: relative;
+  margin-bottom: 1rem;
+  padding: 1.1rem 1.1rem 1.1rem 3.2rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  counter-increment: step;
+}
+
+.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  top: 1.1rem;
+  left: 1.1rem;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.steps > li > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  margin: 0 0.4rem 0.4rem 0;
+  padding: 0 1.1rem;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn.primary {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  margin-right: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 1.05rem;
+}
+
+.btn.ghost {
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.btn.small {
+  min-height: 38px;
+  padding: 0 0.8rem;
+  font-size: 0.9rem;
+}
+
+.btn.copied {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* The manual fallbacks, folded away until wanted */
+
+.fallback {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.fallback summary {
+  color: var(--muted);
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.fallback > *:not(summary) {
+  margin-top: 0.75rem;
+}
+
+.urlbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.urlbox code {
+  flex: 1;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Screenshots */
+
+/* Phone captures are twice as tall as they are wide, so a pair has to sit side by side or
+   the step scrolls off the screen. Flex with a small basis and a cap rather than a grid:
+   auto-fill counts tracks using the *maximum* size, so a 140px track only fits once in the
+   ~287px a step actually has, and the pair silently stacks. */
+.shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.shots figure {
+  flex: 1 1 110px;
+  max-width: 140px;
+  margin: 0;
+}
+
+.shots img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+/* QR */
+
+.qr svg {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  height: auto;
+  padding: 6px;
+  background: #fff;
+  border-radius: 10px;
+}
+
+.done {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* Account */
+
+.account {
+  margin-top: 1.5rem;
+  padding: 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.account dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0;
+}
+
+.account dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.account dd {
+  margin: 0;
+  text-align: right;
+}
+
+.state-active {
+  color: var(--ok);
+}
+
+.state-disabled,
+.state-expired,
+.state-over_quota {
+  color: var(--warn);
+}

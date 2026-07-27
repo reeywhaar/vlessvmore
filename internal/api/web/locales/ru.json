@@ -1,0 +1,65 @@
+{
+  "code": "ru",
+  "name": "Русский",
+
+  "title": "Настройка подключения",
+  "subtitle": "Три шага, около двух минут.",
+
+  "step_install": "Установите приложение",
+  "step_install_body": "Hiddify бесплатный и с открытым исходным кодом.",
+  "store_button": "Установить Hiddify",
+  "direct_button": "Скачать APK напрямую",
+
+  "step_add": "Добавьте профиль",
+  "step_add_body": "Когда приложение установлено, нажмите кнопку ниже. Hiddify откроется с готовым профилем.",
+  "add_button": "Добавить в Hiddify",
+
+  "manual_title": "Ничего не произошло?",
+  "manual_body": "Скопируйте ссылку, откройте Hiddify, нажмите + справа сверху, затем «Clipboard».",
+  "copy_button": "Скопировать ссылку",
+  "copied_label": "Скопировано",
+
+  "qr_title": "Открыли эту страницу на компьютере?",
+  "qr_body": "В Hiddify на телефоне нажмите + и «Scan QR», затем наведите камеру на этот код.",
+
+  "step_connect": "Подключитесь",
+  "step_connect_body": "Нажмите большую кнопку в середине.",
+
+  "step_done": "Готово",
+  "step_done_body": "Зелёный цвет значит, что подключение работает. Нажмите ту же кнопку ещё раз, чтобы отключиться.",
+
+  "account_title": "Ваш доступ",
+  "account_name": "Имя",
+  "account_used": "Израсходовано",
+  "account_quota": "Лимит",
+  "account_expires": "Действует до",
+  "account_status": "Состояние",
+  "status_active": "Активен",
+  "status_disabled": "Отключён",
+  "status_expired": "Срок истёк",
+  "status_over_quota": "Лимит исчерпан",
+  "unlimited": "Без ограничений",
+  "never": "Бессрочно",
+
+  "language_label": "Язык",
+  "device_label": "Устройство",
+
+  "platforms": {
+    "ios": {
+      "label": "iPhone",
+      "install": "Установите Hiddify из App Store."
+    },
+    "android": {
+      "label": "Android",
+      "install": "Установите Hiddify из Google Play или скачайте напрямую, если магазин недоступен."
+    }
+  },
+
+  "shots": {
+    "add-plus": "Главный экран Hiddify, отмечена кнопка «плюс» справа сверху",
+    "add-clipboard": "Панель добавления профиля в Hiddify, отмечена кнопка «Clipboard»",
+    "add-qr": "Панель добавления профиля в Hiddify, отмечена кнопка «Scan QR»",
+    "connect": "Hiddify с загруженным профилем, отмечена круглая кнопка подключения",
+    "connected": "Hiddify с подключённым профилем, кнопка зелёная"
+  }
+}

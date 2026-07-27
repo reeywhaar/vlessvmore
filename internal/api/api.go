@@ -62,6 +62,10 @@ func (s *Server) Handler(requireAuth bool) http.Handler {
 	// credential — and outside /api so it is obvious this route is public.
 	mux.HandleFunc("GET "+SubPath+"{token}", s.subscription)
 
+	// The install page and its assets, on the same credential.
+	mux.HandleFunc("GET "+ShowPath+"{token}", s.show)
+	mux.HandleFunc("GET "+StaticPath+"{name}", s.staticAsset)
+
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("POST /api/reload", s.reload)
 
@@ -94,7 +98,12 @@ func isPublic(path string) bool {
 	if path == "/" {
 		return true
 	}
-	return strings.HasPrefix(path, SubPath)
+	for _, prefix := range []string{SubPath, ShowPath, StaticPath} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // authenticate enforces a bearer token on everything that is not public. A rejection is
@@ -226,6 +235,16 @@ type UserResponse struct {
 	store.User
 	Usage           *UsageSummary `json:"usage,omitempty"`
 	SubscriptionURL string        `json:"subscription_url,omitempty"`
+	InstallURL      string        `json:"install_url,omitempty"`
+}
+
+// userResponse derives both URLs, so no handler has to remember to.
+func (s *Server) userResponse(u *store.User) UserResponse {
+	return UserResponse{
+		User:            *u,
+		SubscriptionURL: s.SubscriptionURL(u),
+		InstallURL:      s.ShowURL(u),
+	}
 }
 
 // UsageSummary is a user's traffic, both lifetime and within the current quota window.
@@ -266,7 +285,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]UserResponse, 0, len(users))
 	for i := range users {
-		resp := UserResponse{User: users[i], SubscriptionURL: s.SubscriptionURL(&users[i])}
+		resp := s.userResponse(&users[i])
 		if withUsage {
 			sum, err := s.usageSummary(r, &users[i])
 			if err != nil {
@@ -286,7 +305,7 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	resp := UserResponse{User: *u, SubscriptionURL: s.SubscriptionURL(u)}
+	resp := s.userResponse(u)
 	sum, err := s.usageSummary(r, u)
 	if err != nil {
 		writeStoreError(w, err)
@@ -326,7 +345,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.reloadAfterChange(r, w, http.StatusCreated, UserResponse{User: *u, SubscriptionURL: s.SubscriptionURL(u)})
+	s.reloadAfterChange(r, w, http.StatusCreated, s.userResponse(u))
 }
 
 // PatchUserRequest is the body of PATCH /api/users/{id}. Absent fields are unchanged;
@@ -378,7 +397,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.reloadAfterChange(r, w, http.StatusOK, UserResponse{User: *u, SubscriptionURL: s.SubscriptionURL(u)})
+	s.reloadAfterChange(r, w, http.StatusOK, s.userResponse(u))
 }
 
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +420,7 @@ func (s *Server) resetUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Resetting can re-enable a quota-disabled user, so the config may change.
-	s.reloadAfterChange(r, w, http.StatusOK, UserResponse{User: *u, SubscriptionURL: s.SubscriptionURL(u)})
+	s.reloadAfterChange(r, w, http.StatusOK, s.userResponse(u))
 }
 
 func (s *Server) userUsage(w http.ResponseWriter, r *http.Request) {
@@ -484,6 +503,7 @@ func (s *Server) userLink(w http.ResponseWriter, r *http.Request) {
 		Name:            u.Name,
 		Link:            uri,
 		SubscriptionURL: s.SubscriptionURL(u),
+		InstallURL:      s.ShowURL(u),
 	}
 
 	// The QR matrix is included by default: a caller asking for a link is almost
@@ -506,6 +526,7 @@ type LinkResponse struct {
 	Name            string   `json:"name"`
 	Link            string   `json:"link"`
 	SubscriptionURL string   `json:"subscription_url,omitempty"`
+	InstallURL      string   `json:"install_url,omitempty"`
 	QR              *link.QR `json:"qr,omitempty"`
 }
 
@@ -519,7 +540,7 @@ func (s *Server) rotateSubToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// No reload: the credential did not change, so sing-box's config is unaffected.
-	writeJSON(w, http.StatusOK, UserResponse{User: *u, SubscriptionURL: s.SubscriptionURL(u)})
+	writeJSON(w, http.StatusOK, s.userResponse(u))
 }
 
 // ServerResponse is the connection information a client needs, minus the secret half.

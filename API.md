@@ -106,8 +106,9 @@ matched case-insensitively. `user show alice` and `user show u_0B4X…` are the 
 `quota_bytes: 0` means unlimited. `expires_at` absent means never. `disabled_reason` is
 present only when enforcement turned the user off, and is `"quota"` or `"expired"`.
 
-`sub_token` is the path segment of the user's subscription URL, and `subscription_url` is
-that URL assembled. Both are credentials.
+`sub_token` is the path segment of the user's subscription URL. `subscription_url` is
+that URL assembled, and `install_url` is the illustrated setup page on the same token.
+All three are credentials.
 
 ### `GET /api/users/{id}`
 
@@ -208,7 +209,7 @@ mid-hour includes that whole hour.
 
 ### `GET /api/users/{id}/link`
 
-The `vless://` URI, the subscription URL, and the URI as a QR bit matrix.
+The `vless://` URI, both user-facing URLs, and the URI as a QR bit matrix.
 
 | query | effect |
 | --- | --- |
@@ -220,6 +221,7 @@ The `vless://` URI, the subscription URL, and the URI as a QR bit matrix.
   "name": "alice",
   "link": "vless://268e4039-…@vpn.example.com:8443?type=tcp&…#alice",
   "subscription_url": "https://vpn.example.com/sub/QK7M2X…",
+  "install_url": "https://vpn.example.com/show/QK7M2X…",
   "qr": {
     "size": 57,
     "rows": ["101110100…", "100000101…"],
@@ -441,6 +443,31 @@ message telling them to renew it. Check `vlessvmore token list`.
 **Socket only.** Not served on the TCP listener, where it would answer strangers with JSON
 no static site serves. The container's `HEALTHCHECK` runs `vlessvmore status`, which goes
 over the socket. If you need an external HTTP health check, point it at `GET /`.
+
+### `GET /show/{token}`
+
+**Unauthenticated**, on the same subscription token as `/sub/{token}`. An illustrated
+setup page: install Hiddify, add the profile with one tap, connect. It picks a language
+from `Accept-Language` and a device from `User-Agent`, and renders every other
+combination hidden so the switches work with no round trip and no JavaScript needed to
+land on the right one.
+
+Also shows the user their own traffic, quota and expiry, which is the same data
+`Subscription-Userinfo` already carries.
+
+`no-store`, and `Referrer-Policy: no-referrer` so the token never leaves in a header when
+someone taps through to an app store.
+
+An unknown token gets the same refusal as everything else.
+
+### `GET /static/{name}?token={token}`
+
+**Unauthenticated**, same token again. The page's CSS, JavaScript and screenshots.
+
+Names are content-addressed (`app.36fc37b9.css`), so responses are
+`private, max-age=31536000, immutable` with an `ETag`. Without a valid token — or with the
+un-hashed name — this is a `404`, so the assets are not a second way to find out this host
+is more than a static site.
 
 ### `GET /`
 

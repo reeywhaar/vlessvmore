@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>{{.Current.Title}}</title>
+<link rel="stylesheet" href="{{.CSS}}">
+</head>
+<body>
+{{$root := .}}
+{{range $l := .Locales}}
+<main class="lang" lang="{{$l.Code}}" data-lang="{{$l.Code}}"{{if ne $l.Code $root.Lang}} hidden{{end}}>
+
+  <h1>{{$l.Title}}</h1>
+  <p class="lede">{{$l.Subtitle}}</p>
+
+  <div class="switches">
+    <div class="seg" role="group" aria-label="{{$l.LanguageLabel}}">
+      {{range $o := $root.Locales}}
+      <button type="button" data-set-lang="{{$o.Code}}" data-title="{{$o.Title}}" aria-pressed="{{eq $o.Code $root.Lang}}">{{$o.Name}}</button>
+      {{end}}
+    </div>
+    <div class="seg" role="group" aria-label="{{$l.DeviceLabel}}">
+      {{range $p := $root.Platforms}}
+      <button type="button" data-set-device="{{$p.ID}}" aria-pressed="{{eq $p.ID $root.Device}}">{{($l.Platform $p.ID).Label}}</button>
+      {{end}}
+    </div>
+  </div>
+
+  <ol class="steps">
+
+    <li>
+      <h2>{{$l.StepInstall}}</h2>
+      <p>{{$l.StepInstallBody}}</p>
+      {{range $p := $root.Platforms}}
+      <div data-device="{{$p.ID}}"{{if ne $p.ID $root.Device}} hidden{{end}}>
+        <p>{{($l.Platform $p.ID).Install}}</p>
+        <a class="btn" href="{{$p.StoreURL}}" target="_blank" rel="noreferrer noopener">{{$l.StoreButton}}</a>
+        {{if $p.DirectURL}}
+        <a class="btn ghost" href="{{$p.DirectURL}}" target="_blank" rel="noreferrer noopener">{{$l.DirectButton}}</a>
+        {{end}}
+      </div>
+      {{end}}
+    </li>
+
+    <li>
+      <h2>{{$l.StepAdd}}</h2>
+      <p>{{$l.StepAddBody}}</p>
+      <a class="btn primary" href="{{$root.DeepLink}}">{{$l.AddButton}}</a>
+
+      <details class="fallback">
+        <summary>{{$l.ManualTitle}}</summary>
+        <p>{{$l.ManualBody}}</p>
+        <div class="urlbox">
+          <code>{{$root.SubURL}}</code>
+          <button type="button" class="btn small" data-copy="{{$root.SubURL}}" data-copied="{{$l.CopiedLabel}}">{{$l.CopyButton}}</button>
+        </div>
+        <div class="shots">
+          <figure>
+            <img src="{{index $root.Shots "add-plus"}}" alt="{{$l.Shot "add-plus"}}" width="{{$root.ShotW}}" height="{{$root.ShotH}}" loading="lazy" decoding="async">
+          </figure>
+          <figure>
+            <img src="{{index $root.Shots "add-clipboard"}}" alt="{{$l.Shot "add-clipboard"}}" width="{{$root.ShotW}}" height="{{$root.ShotH}}" loading="lazy" decoding="async">
+          </figure>
+        </div>
+      </details>
+
+      <details class="fallback">
+        <summary>{{$l.QRTitle}}</summary>
+        <p>{{$l.QRBody}}</p>
+        <div class="qr">{{$root.QR}}</div>
+        <div class="shots">
+          <figure>
+            <img src="{{index $root.Shots "add-qr"}}" alt="{{$l.Shot "add-qr"}}" width="{{$root.ShotW}}" height="{{$root.ShotH}}" loading="lazy" decoding="async">
+          </figure>
+        </div>
+      </details>
+    </li>
+
+    <li>
+      <h2>{{$l.StepConnect}}</h2>
+      <p>{{$l.StepConnectBody}}</p>
+      <div class="shots">
+        <figure>
+          <img src="{{index $root.Shots "connect"}}" alt="{{$l.Shot "connect"}}" width="{{$root.ShotW}}" height="{{$root.ShotH}}" loading="lazy" decoding="async">
+        </figure>
+        <figure>
+          <img src="{{index $root.Shots "connected"}}" alt="{{$l.Shot "connected"}}" width="{{$root.ShotW}}" height="{{$root.ShotH}}" loading="lazy" decoding="async">
+        </figure>
+      </div>
+      <p class="done">{{$l.StepDone}} — {{$l.StepDoneBody}}</p>
+    </li>
+
+  </ol>
+
+  <section class="account">
+    <h2>{{$l.AccountTitle}}</h2>
+    <dl>
+      <dt>{{$l.AccountName}}</dt>
+      <dd>{{$root.Account.Name}}</dd>
+
+      <dt>{{$l.AccountStatus}}</dt>
+      <dd class="state-{{$root.Account.State}}">{{$l.Status $root.Account.State}}</dd>
+
+      <dt>{{$l.AccountUsed}}</dt>
+      <dd>{{$root.Account.Used}}</dd>
+
+      <dt>{{$l.AccountQuota}}</dt>
+      <dd>{{with $root.Account.Quota}}{{.}}{{else}}{{$l.Unlimited}}{{end}}</dd>
+
+      <dt>{{$l.AccountExpires}}</dt>
+      <dd>{{with $root.Account.Expires}}<time datetime="{{.Format "2006-01-02"}}">{{.Format "2006-01-02"}}</time>{{else}}{{$l.Never}}{{end}}</dd>
+    </dl>
+  </section>
+
+</main>
+{{end}}
+<script src="{{.JS}}"></script>
+</body>
+</html>
