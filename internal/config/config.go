@@ -83,6 +83,17 @@ type Config struct {
 	LogLevel      string   `json:"log_level"`
 	StatsInterval Duration `json:"stats_interval"`
 
+	// CORSOrigins lists the origins allowed to call /api from a browser, e.g.
+	// ["https://dash.example.com"]. A single "*" allows any.
+	//
+	// Empty — the default — means no cross-origin access, and is the right setting
+	// unless something actually needs it. A CORS preflight carries no Authorization
+	// header, because browsers never send one, so every preflight this server answers
+	// is answered to an unauthenticated stranger. Answering only for paths that exist
+	// tells that stranger which paths exist. Listing specific origins keeps that
+	// knowledge behind knowing the dashboard's hostname; "*" gives it to everyone.
+	CORSOrigins []string `json:"cors_origins,omitempty"`
+
 	// Template optionally points at a mounted sing-box template that replaces the
 	// embedded one. Advanced use only; the rendered output is still gated by
 	// `sing-box check`, so a broken override cannot take down a running proxy.
@@ -141,6 +152,11 @@ func (c *Config) applyDefaults() {
 	if c.Version == 0 {
 		c.Version = Version
 	}
+	// Origins compare case-insensitively and never carry a trailing slash, so the
+	// operator can be sloppy and the request-time check stays a plain string match.
+	for i, o := range c.CORSOrigins {
+		c.CORSOrigins[i] = strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/"))
+	}
 	c.Name = strings.TrimSpace(c.Name)
 	if c.Port == 0 {
 		c.Port = DefaultPort
@@ -196,6 +212,20 @@ func (c *Config) Validate() error {
 		}
 		if u.Host == "" {
 			return fmt.Errorf("subscription_url_base %q has no host", c.SubscriptionURLBase)
+		}
+	}
+	for _, o := range c.CORSOrigins {
+		if o == "*" {
+			continue
+		}
+		u, err := url.Parse(o)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("cors_origins %q must be an origin like https://dash.example.com, or \"*\"", o)
+		}
+		// An Origin header is scheme://host[:port] and nothing else, so anything with a
+		// path will simply never match what a browser sends.
+		if u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			return fmt.Errorf("cors_origins %q must be scheme://host[:port] with no path", o)
 		}
 	}
 	switch c.LogLevel {

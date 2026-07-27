@@ -405,6 +405,39 @@ Accepts an id or a label. The token stops working immediately.
 
 ---
 
+## Cross-origin requests
+
+Off by default: with no `cors_origins` in config.json, no `Access-Control-*` header is ever
+sent and a preflight is a `404` like anything else.
+
+With it set, a preflight from a listed origin is answered:
+
+```http
+OPTIONS /api/users
+Origin: https://dash.example.com
+Access-Control-Request-Method: GET
+
+204 No Content
+Access-Control-Allow-Origin: https://dash.example.com
+Access-Control-Allow-Methods: GET, POST, PATCH, DELETE
+Access-Control-Allow-Headers: Authorization, Content-Type
+Access-Control-Max-Age: 600
+Vary: Origin
+```
+
+An origin that is not listed — and a request that sends no `Origin` at all — is passed
+through untouched, which for `OPTIONS` means the usual refusal. That is deliberate: a
+preflight has no `Authorization` header to check, so the `Origin` is the only thing
+standing between an anonymous caller and a map of which paths exist. `["*"]` answers
+everyone and gives that up.
+
+Credentials are not involved: the API authenticates with a bearer token, so
+`Access-Control-Allow-Credentials` is never sent and `fetch` must not use
+`credentials: "include"`. Send the token in the `Authorization` header as usual.
+
+CORS says who may *ask*. It does not bypass the token — an allowed origin with no bearer
+token still gets a `404`.
+
 ## Refusals
 
 Every way this server says no produces the same answer:

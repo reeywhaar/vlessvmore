@@ -245,12 +245,23 @@ Details in [CLI.md](CLI.md#export--import).
 | `flow` | `xtls-rprx-vision` | `""` for plain VLESS without vision |
 | `api_listen` | `:80` | management API bind address |
 | `subscription_url_base` | `https://<host>` | origin clients fetch `/sub/<token>` from |
+| `cors_origins` | unset | origins allowed to call `/api` from a browser; `["*"]` for any |
 | `stats_interval` | `30s` | how often traffic is collected |
 | `template` | unset | path to a sing-box template overriding the built-in one |
 
 Setting `name` is worth doing: without it a client labels the profile with the user's own
 name, so Alice's VPN is called "alice". It replaces the label in both places a client
 reads — the `vless://` fragment and the subscription's `Profile-Title`.
+
+`cors_origins` is off unless you set it, and worth understanding before you do. A CORS
+preflight carries no `Authorization` header — browsers never send one — so every preflight
+this server answers is answered to an unauthenticated stranger. Answering only for paths
+that exist would tell that stranger which paths exist, which is precisely what the uniform
+`404` above is for. So the `Origin` is the gate: an origin that is not listed gets the same
+padded `404` as everything else, and only someone who already knows your dashboard's
+hostname can learn anything. `["*"]` trades that away on purpose — it turns "whoever knows
+where the dashboard lives can enumerate `/api`" into "anyone can". It is still no easier to
+*use* the API without a token; it only stops being invisible.
 
 **No key material appears here at all.** The Reality keypair is generated state, not
 something you author, so it lives in `data/identity.json`; the public half is derived

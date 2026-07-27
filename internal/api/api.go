@@ -89,6 +89,11 @@ func (s *Server) Handler(requireAuth bool) http.Handler {
 	if requireAuth {
 		h = s.authenticate(h)
 	}
+	// Outside authenticate, because a preflight has no credential to check and must be
+	// answered — or refused — before the bearer check ever looks at it.
+	if p := newCORSPolicy(s.cfg.CORSOrigins); p != nil {
+		h = s.cors(p, h)
+	}
 	return s.logRequests(s.antibunsteal(requireAuth, h))
 }
 
