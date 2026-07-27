@@ -452,6 +452,16 @@ from `Accept-Language` and a device from `User-Agent`, and renders every other
 combination hidden so the switches work with no round trip and no JavaScript needed to
 land on the right one.
 
+| query | effect |
+| --- | --- |
+| `lang=ru` | force the language instead of reading `Accept-Language` |
+| `device=android` | force the device instead of reading `User-Agent` |
+
+Either one overrides both the request headers *and* whatever the reader chose on an
+earlier visit — the point is to hand someone a link when you already know what they read
+and what they carry. A value this build does not ship falls back to guessing rather than
+erroring, so a typo still yields a usable page.
+
 Also shows the user their own traffic, quota and expiry, which is the same data
 `Subscription-Userinfo` already carries.
 

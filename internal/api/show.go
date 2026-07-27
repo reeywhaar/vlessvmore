@@ -23,18 +23,31 @@ var pageTemplate = template.Must(template.New("page.html.tmpl").ParseFS(pageFS, 
 // whole credential.
 const ShowPath = "/show/"
 
+// LangParam and DeviceParam override what the page would otherwise guess from the request
+// headers.
+const (
+	LangParam   = "lang"
+	DeviceParam = "device"
+)
+
 // pageData is everything page.html.tmpl renders.
 //
-// Every language and every device is rendered into one response, with all but the
-// detected pair marked hidden. The switch then works without a round trip, and a browser
-// with no JavaScript still shows exactly one correct set of instructions.
+// Every language and every device is rendered into one response, with all but the chosen pair
+// marked hidden. The switch then works without a round trip, and a browser with no
+// JavaScript still shows exactly one correct set of instructions.
 type pageData struct {
 	Lang      string
 	Device    string
 	Locales   []Strings
 	Platforms []Platform
 
-	// Current is the detected locale, for the parts of the document that exist once:
+	// ForcedLang and ForcedDevice are set when the URL said which to show. They tell the
+	// page's script not to let a choice remembered from an earlier visit quietly
+	// override the link someone was deliberately sent.
+	ForcedLang   string
+	ForcedDevice string
+
+	// Current is the chosen locale, for the parts of the document that exist once:
 	// <title> and <html lang>. JavaScript updates the title when the switch is used.
 	Current Strings
 
@@ -83,26 +96,42 @@ func (s *Server) show(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lang := pickLocale(r.Header.Get("Accept-Language"))
+	// ?lang= and ?device= win over the headers, for handing someone a link when you already
+	// know what they read and what they carry. An unknown value falls back to detection
+	// rather than erroring: the page is for people, and a typo should still be useful.
+	forcedLang := knownLocale(r.URL.Query().Get(LangParam))
+	forcedDevice := knownPlatform(r.URL.Query().Get(DeviceParam))
+
+	lang := forcedLang
+	if lang == "" {
+		lang = pickLocale(r.Header.Get("Accept-Language"))
+	}
+	device := forcedDevice
+	if device == "" {
+		device = pickPlatform(r.Header.Get("User-Agent"))
+	}
+
 	shots := make(map[string]string, len(hiddifyShots))
 	for _, name := range hiddifyShots {
 		shots[name] = assetURL(name+".webp", token)
 	}
 
 	data := pageData{
-		Lang:      lang,
-		Device:    pickPlatform(r.Header.Get("User-Agent")),
-		Locales:   locales,
-		Platforms: platforms,
-		Current:   localeByCode(lang),
-		DeepLink:  template.URL(hiddifyImportLink(subURL, s.cfg.ClientLabel(u.Name))),
-		SubURL:    subURL,
-		QR:        qrSVG(qr),
-		CSS:       assetURL("app.css", token),
-		JS:        assetURL("app.js", token),
-		Shots:     shots,
-		ShotW:     shotWidth,
-		ShotH:     shotHeight,
+		Lang:         lang,
+		Device:       device,
+		ForcedLang:   forcedLang,
+		ForcedDevice: forcedDevice,
+		Locales:      locales,
+		Platforms:    platforms,
+		Current:      localeByCode(lang),
+		DeepLink:     template.URL(hiddifyImportLink(subURL, s.cfg.ClientLabel(u.Name))),
+		SubURL:       subURL,
+		QR:           qrSVG(qr),
+		CSS:          assetURL("app.css", token),
+		JS:           assetURL("app.js", token),
+		Shots:        shots,
+		ShotW:        shotWidth,
+		ShotH:        shotHeight,
 		Account: account{
 			Name:    u.Name,
 			Used:    bytesize.Format(usage.WindowTotal),

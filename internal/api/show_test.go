@@ -130,6 +130,75 @@ func TestShowPageDefaultsFromRequestHeaders(t *testing.T) {
 	}
 }
 
+// ?lang= and ?device= are for sending a link to someone whose language and phone you
+// already know, so they have to win over whatever the browser says about itself.
+func TestShowPageQueryOverridesHeaders(t *testing.T) {
+	s, _ := testServer(t)
+	u := newUserWithSub(t, s, `{"name":"alice"}`)
+
+	// Headers that would otherwise produce English on an iPhone.
+	headers := map[string]string{
+		"Accept-Language": "en-US,en;q=0.9",
+		"User-Agent":      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)",
+	}
+
+	tests := []struct {
+		name       string
+		query      string
+		wantLang   string
+		wantDevice string
+	}{
+		{"no query", "", "en", "ios"},
+		{"language only", "?lang=ru", "ru", "ios"},
+		{"device only", "?device=android", "en", "android"},
+		{"both", "?lang=ru&device=android", "ru", "android"},
+		{"uppercase", "?lang=RU&device=ANDROID", "ru", "android"},
+		// A typo should still give a usable page, not an error page.
+		{"unknown language", "?lang=de", "en", "ios"},
+		{"unknown device", "?device=blackberry", "en", "ios"},
+		{"empty values", "?lang=&device=", "en", "ios"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := getPage(t, s, ShowPath+u.SubToken+tt.query, headers).Body.String()
+
+			if want := `data-lang="` + tt.wantLang + `">`; !strings.Contains(body, want) {
+				t.Errorf("no visible pane for language %q", tt.wantLang)
+			}
+			if want := `data-device="` + tt.wantDevice + `">`; !strings.Contains(body, want) {
+				t.Errorf("no visible pane for device %q", tt.wantDevice)
+			}
+		})
+	}
+}
+
+// The script restores a choice from localStorage, which would otherwise silently undo a
+// link someone was deliberately sent. These attributes are how it knows not to.
+func TestShowPageMarksForcedChoices(t *testing.T) {
+	s, _ := testServer(t)
+	u := newUserWithSub(t, s, `{"name":"alice"}`)
+
+	forced := getPage(t, s, ShowPath+u.SubToken+"?lang=ru&device=android", nil).Body.String()
+	if !strings.Contains(forced, `data-forced-lang="ru"`) {
+		t.Error("a forced language is not marked for the script")
+	}
+	if !strings.Contains(forced, `data-forced-device="android"`) {
+		t.Error("a forced device is not marked for the script")
+	}
+
+	// Detected, not forced: a remembered choice should still win.
+	detected := getPage(t, s, ShowPath+u.SubToken, nil).Body.String()
+	if strings.Contains(detected, "data-forced-") {
+		t.Error("a detected choice was marked as forced")
+	}
+
+	// A value we do not ship must not be echoed back into the document.
+	bogus := getPage(t, s, ShowPath+u.SubToken+"?lang=de&device=blackberry", nil).Body.String()
+	if strings.Contains(bogus, "data-forced-") {
+		t.Error("an unknown value was marked as forced")
+	}
+}
+
 func TestShowPageCarriesTheCredential(t *testing.T) {
 	s, _ := testServer(t)
 	u := newUserWithSub(t, s, `{"name":"alice"}`)

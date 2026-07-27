@@ -1,5 +1,7 @@
 package api
 
+import "strings"
+
 // Platform is one entry in the install page's OS switch.
 //
 // URLs live here rather than in the locale files so a translation cannot break a link, and
@@ -44,11 +46,13 @@ const (
 	shotHeight = 1109
 )
 
-func platformByID(id string) (Platform, bool) {
+// knownPlatform echoes a platform id the page can render, or "" for anything else.
+func knownPlatform(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
 	for _, p := range platforms {
 		if p.ID == id {
-			return p, true
+			return p.ID
 		}
 	}
-	return Platform{}, false
+	return ""
 }

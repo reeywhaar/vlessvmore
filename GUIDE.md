@@ -248,7 +248,11 @@ docker exec vlessvmore vlessvmore user install alice
 That prints a setup page URL. Send it to whoever the account is for and they are done
 without you: the page installs Hiddify, adds the profile with one tap, and shows them
 their own traffic and expiry afterwards. It picks their language and phone from the
-browser, and both are switchable if it guesses wrong.
+browser, and both are switchable if it guesses wrong. If you already know, say so:
+
+```sh
+docker exec vlessvmore vlessvmore user install alice --lang ru --device android
+```
 
 The URL carries the same subscription token, so treat it as carefully as the subscription
 URL itself — `user rotate-sub` invalidates both together.

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -511,6 +512,7 @@ the link itself. ` + "`user rotate-sub`" + ` invalidates it without disturbing t
 
 func newUserInstallCmd() *cobra.Command {
 	var qr bool
+	var lang, device string
 	cmd := &cobra.Command{
 		Use:   "install <name|id>",
 		Short: "Print a user's install page URL",
@@ -519,6 +521,11 @@ func newUserInstallCmd() *cobra.Command {
 The page walks them through installing Hiddify, adding their profile with one tap, and
 connecting, in their own language and for their own phone. It shows their traffic and
 expiry too, so "how much have I used?" answers itself.
+
+Language and device are guessed from the browser. Pass --lang or --device when you
+already know better than the guess will; the page then ignores both the browser's headers
+and any choice the reader made on an earlier visit. A value the server does not have falls
+back to guessing rather than failing, so a typo still yields a usable page.
 
 Send this rather than a bare subscription URL when the person on the other end has not
 done it before. It carries the same subscription token, so it is exactly as sensitive,
@@ -534,18 +541,49 @@ and ` + "`user rotate-sub`" + ` invalidates both at once.`,
 			if u.InstallURL == "" {
 				return fmt.Errorf("user %q has no subscription token", u.Name)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), u.InstallURL)
+			target, err := withQuery(u.InstallURL, map[string]string{
+				api.LangParam:   lang,
+				api.DeviceParam: device,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), target)
 			// Stderr, so the QR never lands in `URL=$(vlessvmore user install alice)`.
 			if qr {
 				errOut := cmd.ErrOrStderr()
 				fmt.Fprintln(errOut)
-				printQR(errOut, u.InstallURL)
+				printQR(errOut, target)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&qr, "qr", true, "draw a QR code; --qr=false to suppress it")
+	f := cmd.Flags()
+	f.BoolVar(&qr, "qr", true, "draw a QR code; --qr=false to suppress it")
+	f.StringVar(&lang, "lang", "", "force the page's language, e.g. ru (default: guess from the browser)")
+	f.StringVar(&device, "device", "", "force the page's device, e.g. android (default: guess from the browser)")
 	return cmd
+}
+
+// withQuery adds non-empty parameters to a URL, leaving it untouched when there are none.
+func withQuery(raw string, params map[string]string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse %q: %w", raw, err)
+	}
+	q := u.Query()
+	added := false
+	for k, v := range params {
+		if v != "" {
+			q.Set(k, v)
+			added = true
+		}
+	}
+	if !added {
+		return raw, nil
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func newUserRotateSubCmd() *cobra.Command {

@@ -112,6 +112,17 @@ func localeByCode(code string) Strings {
 	return locales[0]
 }
 
+// knownLocale echoes a language code this build ships, or "" for anything else.
+func knownLocale(code string) string {
+	code = strings.ToLower(strings.TrimSpace(code))
+	for _, l := range locales {
+		if l.Code == code {
+			return l.Code
+		}
+	}
+	return ""
+}
+
 // locales is every shipped translation, fallback first and the rest by code. Built once
 // at init: a malformed locale file is a programming error, not a runtime condition.
 var locales = mustLoadLocales()

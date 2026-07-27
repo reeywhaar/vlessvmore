@@ -46,7 +46,15 @@
       }
     });
 
-    // A remembered choice beats the server's guess, which was made from headers.
+    // A URL that named this one beats everything: whoever sent the link knew something
+    // the browser does not. Applying it also stores it, so it survives a reload.
+    var forced = document.body.dataset['forced' + kind.charAt(0).toUpperCase() + kind.slice(1)];
+    if (forced) {
+      apply(kind, forced);
+      return;
+    }
+
+    // Otherwise a remembered choice beats the server's guess, which came from headers.
     var saved = null;
     try {
       saved = localStorage.getItem('vv.' + kind);

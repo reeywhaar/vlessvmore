@@ -9,7 +9,7 @@
 <title>{{.Current.Title}}</title>
 <link rel="stylesheet" href="{{.CSS}}">
 </head>
-<body>
+<body{{with .ForcedLang}} data-forced-lang="{{.}}"{{end}}{{with .ForcedDevice}} data-forced-device="{{.}}"{{end}}>
 {{$root := .}}
 {{range $l := .Locales}}
 <main class="lang" lang="{{$l.Code}}" data-lang="{{$l.Code}}"{{if ne $l.Code $root.Lang}} hidden{{end}}>

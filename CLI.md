@@ -194,7 +194,17 @@ Prints the setup page URL and nothing else. Aliased as `user page`.
 ```sh
 vlessvmore user install alice
 vlessvmore user install alice --qr
+vlessvmore user install alice --lang ru --device android
 ```
+
+| flag | effect |
+| --- | --- |
+| `--lang` | force the page's language rather than guessing from the browser |
+| `--device` | force the page's device rather than guessing from the user agent |
+
+Both append a query parameter to the URL, and both override what the reader chose on an
+earlier visit — use them when you already know the answer. An unknown value falls back to
+guessing rather than failing.
 
 **Send this to a person; send `user sub` to a machine.** The page walks them through
 installing Hiddify, adding the profile with one tap, and connecting, with screenshots — in
