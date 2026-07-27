@@ -235,21 +235,29 @@ p {
   margin-top: 0.75rem;
 }
 
+/* Stacked, not side by side. On one row the URL is a flex item whose overflow-x makes its
+   automatic min-width resolve to zero, so a long button label — "Скопировать ссылку" is
+   twice the width of "Copy link" — squeezes it down to a couple of characters. */
 .urlbox {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.5rem;
-  padding: 0.5rem 0.6rem;
+  padding: 0.6rem;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 10px;
 }
 
+/* Wrapped rather than scrolled: the whole URL is visible and selectable, which is what
+   the manual fallback is for. A subscription URL has no spaces, hence anywhere. */
 .urlbox code {
-  flex: 1;
-  overflow-x: auto;
   font-size: 0.78rem;
-  white-space: nowrap;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.urlbox .btn {
+  margin: 0;
 }
 
 /* Screenshots */
