@@ -15,8 +15,16 @@
 {{range $l := .Locales}}
 <main class="lang" lang="{{$l.Code}}" data-lang="{{$l.Code}}"{{if ne $l.Code $root.Lang}} hidden{{end}}>
 
-  <h1>{{$l.Title}}</h1>
-  <p class="lede">{{$l.Subtitle}}</p>
+  <header class="head">
+    <!-- The same file the browser is already showing in the tab, so it costs no extra
+         request. Decorative: alt is empty because the heading beside it says the same
+         thing, and a screen reader announcing "hat" here would only be noise. -->
+    <img class="mark" src="{{$root.Favicon}}" alt="" width="52" height="52" decoding="async">
+    <div>
+      <h1>{{$l.Title}}</h1>
+      <p class="lede">{{$l.Subtitle}}</p>
+    </div>
+  </header>
 
   <div class="switches">
     <div class="seg" role="group" aria-label="{{$l.LanguageLabel}}">

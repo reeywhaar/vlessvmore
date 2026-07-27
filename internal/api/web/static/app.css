@@ -72,8 +72,29 @@ p {
 }
 
 .lede {
-  margin-bottom: 1.25rem;
   color: var(--muted);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.4rem;
+}
+
+/* flex:none so the mark keeps its size when the title wraps to three lines. */
+.head .mark {
+  flex: none;
+  width: 52px;
+  height: 52px;
+}
+
+.head h1 {
+  margin-bottom: 0.1rem;
+}
+
+.head .lede {
+  margin-bottom: 0;
 }
 
 /* Segmented controls */
