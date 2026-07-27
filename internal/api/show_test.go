@@ -221,6 +221,11 @@ func TestShowPageCarriesTheCredential(t *testing.T) {
 	if !strings.Contains(body, StaticPath+"app.") || !strings.Contains(body, "token="+u.SubToken) {
 		t.Error("assets are not referenced with a token")
 	}
+	// Without an explicit icon the browser goes looking for /favicon.ico, which is a
+	// refusal like any other and leaves the tab showing a blank page icon.
+	if !strings.Contains(body, `rel="icon"`) || !strings.Contains(body, StaticPath+"favicon.") {
+		t.Error("the page declares no favicon")
+	}
 }
 
 // html/template drops a URL whose scheme it does not recognise unless it is typed as

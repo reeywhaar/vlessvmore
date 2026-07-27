@@ -55,11 +55,12 @@ type pageData struct {
 	SubURL   string
 	QR       template.HTML
 
-	CSS   string
-	JS    string
-	Shots map[string]string // Screenshot name to its asset URL.
-	ShotW int
-	ShotH int
+	CSS     string
+	JS      string
+	Favicon string
+	Shots   map[string]string // Screenshot name to its asset URL.
+	ShotW   int
+	ShotH   int
 
 	Account account
 }
@@ -129,6 +130,7 @@ func (s *Server) show(w http.ResponseWriter, r *http.Request) {
 		QR:           qrSVG(qr),
 		CSS:          assetURL("app.css", token),
 		JS:           assetURL("app.js", token),
+		Favicon:      assetURL("favicon.svg", token),
 		Shots:        shots,
 		ShotW:        shotWidth,
 		ShotH:        shotHeight,

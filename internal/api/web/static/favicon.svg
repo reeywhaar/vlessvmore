@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- A fedora and a moustache, which between them are enough of a person. In the accent
+       green from app.css, baked in rather than inherited: a favicon renders in its own
+       document and cannot see the page's custom properties. Change it here too if the
+       accent moves. -->
+  <g transform="translate(0 -3.1)">
+    <!-- SVG has no z-index, only paint order, and this one is the whole trick: brim
+         first, so the crown covers the part of it that would be behind the hat, and the
+         band goes on last with nothing left to paint over it. Brim last — the obvious
+         order — buries most of the band under the ellipse. -->
+    <ellipse fill="#699e6c" cx="16" cy="20.4" rx="14" ry="3"/>
+    <!-- Crown. The shallow dip along the top is the crease that says fedora rather than
+         bowler; deeper than this and it reads as two bumps at 16px. -->
+    <path fill="#699e6c" d="M9 19c0-6.4 1.5-9.6 4-9.6 1.2 0 1.9 1.2 3 1.2s1.8-1.2 3-1.2c2.5 0 4 3.2 4 9.6z"/>
+    <!-- Band, a darker tint of the same green, filling the bottom of the crown down to
+         its base. The corners sit on the crown's own outline: x=9 at the base, 9.25 at
+         y=15, the sides being near enough vertical over that span to trace straight. -->
+    <path fill="#3f6a42" d="M9 19l.25-4h13.5l.25 4z"/>
+  </g>
+  <!-- Moustache. Tips hang below the centre, and the top edge notches in the middle where
+       a nose would be. Written out in absolute coordinates: as relative curves the final
+       segment has to land exactly back on the start point, and being one number off
+       there puts a seam down the middle and makes the two halves disagree. -->
+  <path fill="#699e6c" d="M16 24.3C14.3 25 12.1 24.8 10.4 25.5
+        C11.3 24.1 11.5 23 13.3 22.5C14.3 22.3 15.4 22.7 16 23.2
+        C16.6 22.7 17.7 22.3 18.7 22.5C20.5 23 20.7 24.1 21.6 25.5
+        C19.9 24.8 17.7 25 16 24.3Z"/>
+</svg>

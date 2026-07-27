@@ -42,6 +42,7 @@ func TestStaticServesEveryEmbeddedType(t *testing.T) {
 		"app.css":      "text/css; charset=utf-8",
 		"app.js":       "text/javascript; charset=utf-8",
 		"connect.webp": "image/webp",
+		"favicon.svg":  "image/svg+xml",
 	}
 	for name, wantType := range tests {
 		t.Run(name, func(t *testing.T) {
