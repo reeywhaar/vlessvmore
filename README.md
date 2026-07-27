@@ -320,6 +320,17 @@ for `linux/amd64` and `linux/arm64`, after `go vet` and the test suite pass. Onl
 is tagged, so the commit is embedded at build time instead — `vlessvmore version` reports
 it.
 
+The run reports to Telegram when it finishes, saying which half broke if it did. Set two
+repository secrets to switch that on:
+
+| secret | what |
+| --- | --- |
+| `TELEGRAM_TOKEN` | a bot token from [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_TO` | the chat id to post to |
+
+Both are optional. With either missing the notify steps skip themselves rather than
+failing, so an unconfigured fork does not get a red run on every push.
+
 The image builds sing-box itself, with only the build tags this deployment uses — see
 `SINGBOX_TAGS` in the [Dockerfile](Dockerfile). Upstream's default set adds gvisor,
 quic-go, tailscale, wireguard and the Anthropic and OpenAI SDKs, none of which the

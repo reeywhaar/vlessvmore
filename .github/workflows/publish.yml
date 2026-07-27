@@ -44,6 +44,9 @@ jobs:
       # Required to push to GHCR with the built-in token.
       packages: write
 
+    outputs:
+      version: ${{ steps.sha.outputs.short }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -88,3 +91,51 @@ jobs:
           docker run --rm --entrypoint sing-box \
             ghcr.io/${{ github.repository }}:latest version
           docker run --rm ghcr.io/${{ github.repository }}:latest version
+
+  # A job of its own rather than steps on `publish`, because a failing `test` *skips*
+  # `publish` rather than failing it, and a step in a job that never starts cannot report
+  # that it never started. This one runs either way and reads the results off `needs`.
+  notify:
+    needs: [test, publish]
+    # Not always(): cancel-in-progress means a newer push kills the run in flight, and
+    # being told that a commit you just superseded was cancelled is noise.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    # The secrets context is not available to `if`, so the presence check goes through
+    # env. Without this, a repo that has not set the secrets yet gets a red run on every
+    # push — a broken notifier should not look like a broken build.
+    env:
+      TELEGRAM_TO: ${{ secrets.TELEGRAM_TO }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+
+    steps:
+      - name: Notify Telegram on success
+        if: ${{ env.TELEGRAM_TOKEN != '' && env.TELEGRAM_TO != '' && needs.publish.result == 'success' }}
+        uses: appleboy/telegram-action@v1.0.1
+        with:
+          to: ${{ env.TELEGRAM_TO }}
+          token: ${{ env.TELEGRAM_TOKEN }}
+          format: markdown
+          disable_web_page_preview: true
+          message: |
+            📦 *${{ github.repository }}* published `ghcr.io/${{ github.repository }}:latest`
+
+            version `${{ needs.publish.outputs.version }}` — [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) by ${{ github.actor }}
+
+      - name: Notify Telegram on failure
+        if: ${{ env.TELEGRAM_TOKEN != '' && env.TELEGRAM_TO != '' && needs.publish.result != 'success' }}
+        uses: appleboy/telegram-action@v1.0.1
+        with:
+          to: ${{ env.TELEGRAM_TO }}
+          token: ${{ env.TELEGRAM_TOKEN }}
+          format: markdown
+          disable_web_page_preview: true
+          # Which half broke is the first thing worth knowing: a failing test means the
+          # commit is bad, a failing publish means the commit is fine and the build is not.
+          message: |
+            ❌ *${{ github.repository }}* ${{ needs.test.result != 'success' && 'tests failed' || 'publish failed' }}
+
+            [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) by ${{ github.actor }}
+            [View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
