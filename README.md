@@ -253,6 +253,17 @@ Setting `name` is worth doing: without it a client labels the profile with the u
 name, so Alice's VPN is called "alice". It replaces the label in both places a client
 reads — the `vless://` fragment and the subscription's `Profile-Title`.
 
+```json
+  "cors_origins": ["https://dash.example.com", "http://localhost:5173"],
+```
+
+Each entry is an origin exactly as a browser sends it in the `Origin` header — scheme,
+host, and a port only when it is not the scheme's default
+([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)). No path and no
+subdomain wildcards; `["*"]` allows any. Case, a trailing slash and a redundant `:443`
+or `:80` are normalised, and anything that could never match a real `Origin` fails at
+startup. Full table in [API.md](API.md#writing-cors_origins).
+
 `cors_origins` is off unless you set it, and worth understanding before you do. A CORS
 preflight carries no `Authorization` header — browsers never send one — so every preflight
 this server answers is answered to an unauthenticated stranger. Answering only for paths

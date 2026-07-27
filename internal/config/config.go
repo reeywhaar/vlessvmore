@@ -107,6 +107,24 @@ type Handshake struct {
 	ServerPort int    `json:"server_port"`
 }
 
+// normalizeOrigin puts an entry into the exact form a browser sends, so the request-time
+// check can stay a plain string match.
+//
+// Case and a trailing slash are just sloppiness. The default port is the trap: RFC 6454's
+// serialization omits it, so a browser on https://dash.example.com sends exactly that and
+// never ":443". Written with the port, the entry would be valid, look right, and never
+// once match.
+func normalizeOrigin(o string) string {
+	o = strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/"))
+	switch {
+	case strings.HasPrefix(o, "https://"):
+		return strings.TrimSuffix(o, ":443")
+	case strings.HasPrefix(o, "http://"):
+		return strings.TrimSuffix(o, ":80")
+	}
+	return o
+}
+
 // Load reads and validates config.json from path.
 func Load(path string) (*Config, error) {
 	f, err := os.Open(path)
@@ -152,10 +170,8 @@ func (c *Config) applyDefaults() {
 	if c.Version == 0 {
 		c.Version = Version
 	}
-	// Origins compare case-insensitively and never carry a trailing slash, so the
-	// operator can be sloppy and the request-time check stays a plain string match.
 	for i, o := range c.CORSOrigins {
-		c.CORSOrigins[i] = strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/"))
+		c.CORSOrigins[i] = normalizeOrigin(o)
 	}
 	c.Name = strings.TrimSpace(c.Name)
 	if c.Port == 0 {

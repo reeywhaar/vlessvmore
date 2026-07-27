@@ -182,6 +182,34 @@ func TestCORSOriginMatchingIsLenient(t *testing.T) {
 	}
 }
 
+// Every one of these is the same origin as far as a browser is concerned, and each is
+// something an operator might plausibly type.
+func TestCORSDefaultPortsMatch(t *testing.T) {
+	tests := map[string]string{
+		// written in config          // what the browser sends
+		"https://dash.example.com":     "https://dash.example.com",
+		"https://dash.example.com:443": "https://dash.example.com",
+		"https://dash.example.com/":    "https://dash.example.com",
+		"http://localhost:80":          "http://localhost",
+		"http://localhost:5173":        "http://localhost:5173",
+	}
+	for configured, sent := range tests {
+		t.Run(configured, func(t *testing.T) {
+			s := corsServer(t, `["`+configured+`"]`)
+			if rec := preflight(t, s, "/api/users", sent); rec.Code != http.StatusNoContent {
+				t.Errorf("configured %q, browser sent %q: preflight = %d, want 204",
+					configured, sent, rec.Code)
+			}
+		})
+	}
+
+	// A non-default port is part of the origin and must not be stripped.
+	s := corsServer(t, `["https://dash.example.com:8443"]`)
+	if rec := preflight(t, s, "/api/users", "https://dash.example.com"); rec.Code != http.StatusNotFound {
+		t.Errorf("preflight = %d: a non-default port must still be required", rec.Code)
+	}
+}
+
 func TestCORSOriginsValidation(t *testing.T) {
 	tests := map[string]bool{
 		`[]`:                               true,

@@ -431,6 +431,37 @@ preflight has no `Authorization` header to check, so the `Origin` is the only th
 standing between an anonymous caller and a map of which paths exist. `["*"]` answers
 everyone and gives that up.
 
+### Writing `cors_origins`
+
+Each entry is an **origin**, in exactly the form a browser puts in the `Origin` header:
+scheme, host, and the port only when it is not the scheme's default. That is the
+serialized origin of [RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2),
+the same value that comes back in `Access-Control-Allow-Origin`. No path, no trailing
+slash, no wildcards inside a host.
+
+| entry | matches | note |
+| --- | --- | --- |
+| `https://dash.example.com` | `https://dash.example.com` | the usual case |
+| `https://dash.example.com:8443` | `https://dash.example.com:8443` | a non-default port is part of the origin |
+| `http://localhost:5173` | `http://localhost:5173` | a dev server; `http` and `https` are different origins |
+| `*` | anything | alone in the list, or beside others it makes them redundant |
+
+Case and a trailing slash are cleaned up for you, as is a redundant default port —
+`https://Dash.Example.com:443/` is stored as `https://dash.example.com`. That last one
+matters: a browser on `https://dash.example.com` sends exactly that and never `:443`, so
+without the fixup the entry would be valid, look right, and never match.
+
+These are rejected at startup rather than silently never matching:
+
+| entry | why |
+| --- | --- |
+| `dash.example.com` | no scheme; an `Origin` always has one |
+| `https://dash.example.com/app` | a path is never part of an origin |
+| `https://*.example.com` | subdomain wildcards are not a thing in CORS |
+
+Sub-domains each need their own entry. If that list would be long, the honest options are
+to front them with one origin or to use `*` and accept what it costs.
+
 Credentials are not involved: the API authenticates with a bearer token, so
 `Access-Control-Allow-Credentials` is never sent and `fetch` must not use
 `credentials: "include"`. Send the token in the `Authorization` header as usual.
