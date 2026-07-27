@@ -288,13 +288,18 @@ p {
 
 /* QR */
 
+/* The code carries a four-module quiet zone inside its own viewBox, because scanners lock
+   on poorly without one. On a white card that margin is invisible, so the black looks
+   inset from the text while the element itself is flush with it — the border draws the
+   tile's real edge and the offset stops reading as a mistake. No extra padding here: that
+   would inset it a second time. */
 .qr svg {
   display: block;
   width: 100%;
   max-width: 220px;
   height: auto;
-  padding: 6px;
   background: #fff;
+  border: 1px solid var(--line);
   border-radius: 10px;
 }
 
