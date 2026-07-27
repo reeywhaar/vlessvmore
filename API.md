@@ -334,6 +334,7 @@ Everything a client needs to connect, and nothing secret.
 
 ```json
 {
+  "name": "Reey VPN",
   "host": "vpn.example.com",
   "port": 8443,
   "sni": "vpn.example.com",
@@ -344,6 +345,11 @@ Everything a client needs to connect, and nothing secret.
   "handshake": "caddy-caddy-1:443"
 }
 ```
+
+`name` is `config.json`'s label for this server — what a client displays for the profile,
+via the `vless://` fragment and the subscription's `Profile-Title`. **Omitted when unset**,
+which is not the same as empty: with no name configured, clients fall back to showing the
+user's own name.
 
 `public_key` is derived from the private key on each request and is never stored, so the
 two halves cannot drift apart. **The private key is never returned by any endpoint** — it

@@ -482,6 +482,33 @@ func TestServerInfoNeverReturnsPrivateKey(t *testing.T) {
 	}
 }
 
+// The label an operator configures is what clients display, so anything rendering a
+// server needs to be able to read it back.
+func TestServerInfoReturnsTheConfiguredName(t *testing.T) {
+	s, _ := testServer(t)
+
+	// Unset: absent rather than an empty string, so a caller can tell "no name given"
+	// from "named the empty string" and fall back the way clients do.
+	got := decodeBody[ServerResponse](t, do(t, s, "GET", "/api/server", ""))
+	if got.Name != "" {
+		t.Errorf("name = %q on a config with no name", got.Name)
+	}
+	if strings.Contains(do(t, s, "GET", "/api/server", "").Body.String(), `"name"`) {
+		t.Error("an unset name should be omitted, not sent as empty")
+	}
+
+	cfg, err := config.Parse(strings.NewReader(`{"host":"vpn.example.test","name":"Reey VPN"}`))
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	s.cfg = cfg
+
+	got = decodeBody[ServerResponse](t, do(t, s, "GET", "/api/server", ""))
+	if got.Name != "Reey VPN" {
+		t.Errorf("name = %q, want the configured label", got.Name)
+	}
+}
+
 func TestTokenCreateAndAuthenticate(t *testing.T) {
 	s, _ := testServer(t)
 

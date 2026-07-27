@@ -568,6 +568,12 @@ func (s *Server) rotateSubToken(w http.ResponseWriter, r *http.Request) {
 
 // ServerResponse is the connection information a client needs, minus the secret half.
 type ServerResponse struct {
+	// Name is the operator's label for this server — what a client shows for the
+	// profile, via the vless:// fragment and the subscription's Profile-Title. Absent
+	// when unset, which is not the same as empty: with no name, clients fall back to
+	// displaying the user's own name.
+	Name string `json:"name,omitempty"`
+
 	Host        string `json:"host"`
 	Port        int    `json:"port"`
 	SNI         string `json:"sni"`
@@ -587,6 +593,7 @@ func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	// Only the derived public key is ever returned; the private key stays in
 	// config.json and never crosses this boundary.
 	writeJSON(w, http.StatusOK, ServerResponse{
+		Name:        s.cfg.Name,
 		Host:        s.cfg.Host,
 		Port:        s.cfg.Port,
 		SNI:         s.cfg.SNI,
