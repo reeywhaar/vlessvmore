@@ -3,7 +3,8 @@
 /private
 
 # A real deployment's own files, if you run one from this checkout.
-# config/ holds the Reality private key; data/ holds user UUIDs.
+# data/ holds the Reality private key and user UUIDs; backups/ holds copies of both.
 /docker-compose.yml
 /config
 /data
+/backups

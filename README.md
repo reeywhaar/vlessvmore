@@ -275,9 +275,8 @@ restic, Kopia, a CI job, or the sidecar in [`backup/`](backup/):
       # note: :3000 is deliberately absent from `ports:`
       networks: [caddy, backup-net]
     mybackup:
+      # reaches http://vlessvmore:3000/backup; nothing outside this network can
       networks: [backup-net]
-      environment:
-        VLESSVMORE_URL: http://vlessvmore:3000
   ```
 
   A bearer token would not add much here — anything that can reach the port is already
@@ -287,6 +286,50 @@ restic, Kopia, a CI job, or the sidecar in [`backup/`](backup/):
 The archive is a secret in the same way a dump is: it carries the Reality private key and
 every user UUID. Encrypt it before it leaves the host if the destination is not one you
 control.
+
+### The backup sidecar
+
+[`backup/`](backup/) is a second image in this repo that does the obvious thing with that
+endpoint: fetch, keep a local copy, upload to
+[backio](https://github.com/Reeywhaar/backio), prune, sleep, repeat.
+`docker-compose.example.yml` has it wired up ready to uncomment.
+
+```
+ghcr.io/reeywhaar/vlessvmore-backup:latest
+```
+
+| variable | default | what |
+| --- | --- | --- |
+| `BACKIO_SUBDIRECTORY` | **required** | remote directory; must match the token's grant |
+| `VLESSVMORE_URL` | `http://vlessvmore:3000` | where the backup listener is |
+| `BACKUP_INTERVAL` | `3600` | seconds between backups |
+| `BACKIO_URL` | `http://backio:8080` | backio |
+| `BACKIO_PROVIDER` | `gdrive` | rclone remote name |
+| `BACKUP_TOKEN` | unset | backio token; **unset means local copies only, no upload** |
+| `BACKUP_PASSWORD` | unset | when set, upload a 7z AES-256 `.zip` instead of the plain `.tgz` |
+| `BACKUP_DIR` | `/backups` | where local copies are kept |
+
+Archives are named `vlessvmore-<YYYYMMDD_HHMMSS>.<tgz|zip>`, mode `0600`, and kept in
+`/backups` — mount a volume there for copies that survive the remote being unreachable.
+
+**Retention, applied to both the local directory and the remote:** the newest archive from
+each of the last three days it has one for, plus one at least a week old and one at least a
+month old. So five archives at most, whatever the interval. Each slot falls back to the
+oldest archive when nothing qualifies, so a young deployment deletes nothing.
+
+Pruning the remote needs `read` and `delete` on the backio token; with a `create`-only
+token the uploads still work and the remote simply is not pruned:
+
+```sh
+docker exec backio /backio issue-token "gdrive vlessvmore create,read,delete"
+```
+
+`BACKUP_PASSWORD` is worth setting when the remote is not yours — but **the password is not
+stored anywhere**, so keep it somewhere other than the host being backed up. Without it the
+archive cannot be opened.
+
+Every run logs one JSON line per step to stdout, and a failed run exits non-zero, is logged,
+and is retried at the next interval rather than taking the container down.
 
 ## config.json
 

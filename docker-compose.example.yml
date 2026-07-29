@@ -65,6 +65,9 @@ services:
 
     networks:
       - caddy
+      # Shared with the backup sidecar below, and with nothing else. This is what
+      # reaches :3000 without publishing it.
+      - backup-net
 
     labels:
       # caddy-docker-proxy (github.com/lucaslorentz/caddy-docker-proxy) reads
@@ -88,8 +91,80 @@ services:
       caddy.log.output: stdout
       caddy.log.format: json
 
+  # Optional. Fetches GET /backup on an interval and forwards the archive to backio,
+  # which uploads it to any rclone backend. Delete both services below if you back up
+  # some other way — the endpoint is a plain `curl` away; see README.md.
+  backup:
+    image: ghcr.io/reeywhaar/vlessvmore-backup:latest
+    # To build from this checkout instead:
+    # build:
+    #   context: .
+    #   dockerfile: backup/Dockerfile
+    container_name: vlessvmore-backup
+    restart: unless-stopped
+    depends_on:
+      - vlessvmore
+
+    volumes:
+      # Local copies, rotated by the same retention policy as the remote: 3 daily,
+      # 1 weekly, 1 monthly. Drop this mount to keep backups remote-only.
+      - ./backups:/backups
+
+    networks:
+      - backup-net
+
+    environment:
+      # --- required ---
+      # Remote subdirectory. Must match the one granted to BACKUP_TOKEN.
+      - BACKIO_SUBDIRECTORY=vlessvmore
+
+      # Seconds between backups.
+      - BACKUP_INTERVAL=3600
+
+      # --- where to fetch from ---
+      # Commented out because these are already the defaults, and they resolve to the
+      # service names in this file. Set them if vlessvmore or backio lives somewhere
+      # else — a different service name, another host, another port.
+      # - VLESSVMORE_URL=http://vlessvmore:3000
+      # - BACKIO_URL=http://backio:8080
+
+      # --- remote upload via backio (optional) ---
+      # Omit BACKUP_TOKEN entirely to keep backups local only. `create` is enough to
+      # upload; `read,delete` as well for the remote retention policy to run:
+      #   docker exec backio /backio issue-token "gdrive vlessvmore create,read,delete"
+      - BACKIO_PROVIDER=gdrive
+      - BACKUP_TOKEN=your-backio-token
+
+      # --- encryption (optional but recommended) ---
+      # Set this and the archive is uploaded as a 7z AES-256 zip instead of a plain
+      # tgz. The archive holds the Reality private key and every user UUID, so if the
+      # remote is not yours, encrypt it. WITHOUT THIS PASSWORD THE BACKUP IS
+      # UNRECOVERABLE — store it somewhere other than this host.
+      # - BACKUP_PASSWORD=change-me-and-store-it-safely
+
+  # backio forwards archives to a cloud provider (Google Drive, S3, ...).
+  # See https://github.com/reeywhaar/backio
+  backio:
+    image: ghcr.io/reeywhaar/backio:latest
+    container_name: backio
+    restart: unless-stopped
+    volumes:
+      - backio-data:/data
+    networks:
+      - backup-net
+    environment:
+      # base64-encoded rclone config (e.g. from backio's ./setup-gdrive.sh)
+      - RCLONE_CONF_BASE64=${RCLONE_CONF_BASE64}
+
 networks:
   # Created outside this file, shared with the Caddy container:
   #   docker network create caddy
   caddy:
     external: true
+  # Private to the three services above. The backup listener is unauthenticated, so
+  # nothing else should be able to reach it.
+  backup-net:
+    driver: bridge
+
+volumes:
+  backio-data:
