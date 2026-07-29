@@ -30,6 +30,21 @@ vless://8f1c…@vpn.example.com:8443?type=tcp&encryption=none&flow=xtls-rprx-vis
 New here? [GUIDE.md](GUIDE.md) walks from a bare server to a working VPN on your phone,
 including connecting with Hiddify.
 
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [How it fits together](#how-it-fits-together)
+- [Install](#install)
+- [The Reality handshake, and why Caddy helps](#the-reality-handshake-and-why-caddy-helps)
+- [Everyday use](#everyday-use)
+- [The web control panel](#the-web-control-panel)
+- [Backup and moving hosts](#backup-and-moving-hosts) — [the `/backup` endpoint](#the-backup-endpoint),
+  [the backup sidecar](#the-backup-sidecar)
+- [config.json](#configjson)
+- [Things worth knowing](#things-worth-knowing)
+- [Building from source](#building-from-source)
+- [Not implemented](#not-implemented)
+
 ## Why this exists
 
 sing-box has no runtime user-management API — `experimental/v2rayapi` implements traffic
@@ -191,6 +206,51 @@ Where a quota or expiry *is* set, it is checked every 30 seconds — and expiry 
 minute as well, so it fires for idle users too. Enforcement works by omission: an
 over-quota or expired user is marked disabled, which removes them from the generated
 config, which is what stops them connecting.
+
+## The web control panel
+
+The CLI is the whole surface for one server. For several of them — or for handing the
+day-to-day over to someone who has no shell on the host — there is a separate project,
+[vlessvmorectl](https://github.com/reeywhaar/vlessvmorectl): a web panel that manages any
+number of vlessvmore nodes through their HTTP API.
+
+```
+ghcr.io/reeywhaar/vlessvmorectl:latest
+```
+
+It covers what `user` and `status` cover, in a browser: add and edit users on any node,
+show a user's link, QR code and subscription URL, per-user traffic history, quotas and
+expiry, and a per-node overview. It also has one idea this server does not — **subscribers**:
+accounts on different nodes grouped under one name, with a single share link that shows
+its holder every profile they have.
+
+Mint it a token on each node, and pair each token with that node's URL:
+
+```sh
+docker exec vlessvmore vlessvmore token create panel --raw
+```
+
+```sh
+VLESSVMORE_SERVERS="https://vpn-nl.example.com|MHDJWEZ5…,https://vpn-de.example.com|QK7M2XA9…"
+```
+
+The first administrator can only be created from a shell — there is deliberately no
+web-based bootstrap:
+
+```sh
+docker exec vlessvmorectl vlessvmorectl users add alice
+```
+
+**The browser never receives a bearer token.** Every credentialed call is made by the
+panel's own backend, which attaches the token server-side. Two things follow from that,
+both relevant here: a node's `api_listen` can stay unreachable from the internet, since
+only the panel has to reach it, and `cors_origins` can stay unset, since no browser ever
+talks to a node directly. The cost is the mirror image — a node your browser can reach but
+the panel's host cannot is unmanageable.
+
+The panel itself serves plain HTTP on `:80` and expects TLS terminated in front of it, so
+it slots into the same Caddy setup as above. Its configuration, security notes and CLI are
+in its own README.
 
 ## Backup and moving hosts
 
