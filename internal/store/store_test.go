@@ -561,6 +561,102 @@ func TestUsagePrune(t *testing.T) {
 	}
 }
 
+func TestUsageCompactShrinksTheDatabase(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	u := mustCreate(t, s, "alice")
+
+	// Enough rows for the page count difference to be unambiguous. Loaded in one
+	// transaction; 30k Add calls would dominate the test's runtime.
+	rows := make([]Row, 0, 30_000)
+	for i := range 30_000 {
+		rows = append(rows, Row{
+			UserID: u.ID,
+			Bucket: Bucket(now.Add(-time.Duration(i+1) * time.Hour)),
+			Up:     int64(i),
+			Down:   int64(i) * 2,
+		})
+	}
+	// One recent row, so the prune below leaves something behind to query for.
+	rows = append(rows, Row{UserID: u.ID, Bucket: Bucket(now), Up: 7, Down: 9})
+	if err := s.Usage.Import(ctx, rows); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+
+	if err := s.Usage.Compact(ctx); err != nil {
+		t.Fatalf("Compact while full: %v", err)
+	}
+	full := dbSize(t, dir)
+	if wal := fileSize(t, filepath.Join(dir, StatsFile+"-wal")); wal != 0 {
+		t.Errorf("-wal is %d bytes after a compact, want 0", wal)
+	}
+
+	// Everything except the recent row.
+	if _, err := s.Usage.Prune(ctx, now); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	if err := s.Usage.Compact(ctx); err != nil {
+		t.Fatalf("Compact after prune: %v", err)
+	}
+	pruned := dbSize(t, dir)
+	if wal := fileSize(t, filepath.Join(dir, StatsFile+"-wal")); wal != 0 {
+		t.Errorf("-wal is %d bytes after a compact, want 0", wal)
+	}
+	// Pruning alone leaves the file at its old size, so a Compact that does not shrink
+	// it is doing nothing.
+	if pruned >= full {
+		t.Errorf("%s is %d bytes after pruning 30k rows and compacting, was %d before — no space was reclaimed",
+			StatsFile, pruned, full)
+	}
+
+	// VACUUM rebuilds the database, so check it still answers.
+	up, down, err := s.Usage.Total(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("Total after compact: %v", err)
+	}
+	if up != 7 || down != 9 {
+		t.Errorf("remaining total = %d/%d, want 7/9", up, down)
+	}
+}
+
+func TestUsageCompactIsRepeatable(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+
+	// Nothing to reclaim, twice over: the caller runs this on a timer and cannot know
+	// whether the last run left anything to do.
+	for i := range 2 {
+		if err := s.Usage.Compact(ctx); err != nil {
+			t.Fatalf("Compact %d on an empty database: %v", i+1, err)
+		}
+	}
+}
+
+func dbSize(t *testing.T, dir string) int64 {
+	t.Helper()
+	return fileSize(t, filepath.Join(dir, StatsFile))
+}
+
+// fileSize reports 0 for a missing file, so a caller can ask about the -wal without
+// caring whether SQLite truncated it or removed it.
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return fi.Size()
+}
+
 func TestTokenLifecycle(t *testing.T) {
 	s := open(t)
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -262,6 +263,34 @@ func (u *Usage) Prune(ctx context.Context, before time.Time) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// Compact reclaims the space Prune leaves behind and empties the write-ahead log.
+//
+// Prune's DELETEs return pages to SQLite's free list, not to the filesystem, so without
+// this stats.db never shrinks. VACUUM rewrites the whole database and needs room for a
+// second copy of it, so run it on a timer rather than per request.
+func (u *Usage) Compact(ctx context.Context) error {
+	// Not in a transaction: VACUUM cannot run inside one.
+	//
+	// Before the checkpoint, not after: VACUUM's rewrite is a write, so in WAL mode it
+	// lands in the -wal, and checkpointing first would only refill it.
+	if _, err := u.db.ExecContext(ctx, `VACUUM`); err != nil {
+		return fmt.Errorf("vacuum: %w", err)
+	}
+
+	// TRUNCATE rather than the default PASSIVE: only TRUNCATE resets the -wal to zero
+	// bytes. The pragma reports failure in its result row instead of as an error, so
+	// busy has to be checked or a no-op looks like success.
+	var busy, walFrames, checkpointed int
+	if err := u.db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
+		Scan(&busy, &walFrames, &checkpointed); err != nil {
+		return fmt.Errorf("checkpoint wal: %w", err)
+	}
+	if busy != 0 {
+		return errors.New("checkpoint wal: database busy, -wal left as it was")
+	}
+	return nil
 }
 
 // Row is one stored bucket, for export and import.

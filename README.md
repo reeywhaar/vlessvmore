@@ -298,7 +298,8 @@ reload for exactly this reason.
 the error goes back to whoever asked.
 
 **Traffic is counted in whole hours.** A quota window starting mid-hour includes that
-whole hour. History is kept 90 days.
+whole hour. History is kept 90 days, and a prune that drops buckets is followed by a
+`VACUUM` and a WAL checkpoint, so `stats.db` shrinks instead of only ever growing.
 
 **One interval of traffic can be lost.** Counters are drained on each poll, which makes
 every reading a delta and removes any need to reason about counter resets. The cost is

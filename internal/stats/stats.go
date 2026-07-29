@@ -124,8 +124,16 @@ func (c *Collector) Run(ctx context.Context) {
 				c.log.Error("pruning usage history failed", "error", err)
 				continue
 			}
-			if n > 0 {
-				c.log.Info("pruned old usage buckets", "rows", n, "older_than", cutoff.UTC())
+			if n == 0 {
+				continue
+			}
+			c.log.Info("pruned old usage buckets", "rows", n, "older_than", cutoff.UTC())
+
+			// Only after a prune that deleted something: nothing to reclaim otherwise.
+			// A warning rather than an error, because the prune itself succeeded and
+			// only the file size is left unimproved.
+			if err := c.store.Usage.Compact(ctx); err != nil && ctx.Err() == nil {
+				c.log.Warn("compacting usage history failed", "error", err)
 			}
 		}
 	}
