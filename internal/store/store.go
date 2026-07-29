@@ -17,7 +17,9 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -79,6 +81,56 @@ func (s *Store) RenderedConfigPath() string { return filepath.Join(s.dir, Render
 
 // Close releases the SQLite handle. The JSON stores hold no resources.
 func (s *Store) Close() error { return s.Usage.Close() }
+
+// SnapshotFile is one file from a data directory snapshot. Name is relative to the data
+// directory.
+type SnapshotFile struct {
+	Name string
+	Data []byte
+}
+
+// Snapshot reads the data directory as a set of files that can be written back over a
+// stopped deployment's data directory.
+//
+// The JSON files are read from disk rather than re-marshalled from memory, so a restored
+// file is byte-identical to the one that was backed up. Each is written atomically, so a
+// concurrent change yields either the old or the new file and never half of one; no
+// invariant spans two of them, so reading them one at a time is enough.
+//
+// stats.db goes through Usage.Snapshot, being the one file a plain copy can tear.
+func (s *Store) Snapshot(ctx context.Context) ([]SnapshotFile, error) {
+	tmp, err := os.MkdirTemp("", "vlessvmore-snapshot")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+
+	statsPath := filepath.Join(tmp, StatsFile)
+	if err := s.Usage.Snapshot(ctx, statsPath); err != nil {
+		return nil, err
+	}
+	stats, err := os.ReadFile(statsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Identity first: it is the file that must survive, so it should be the first thing
+	// out and the first thing back in.
+	var out []SnapshotFile
+	for _, name := range []string{IdentityFile, UsersFile, TokensFile, RenderedConfig} {
+		data, err := os.ReadFile(filepath.Join(s.dir, name))
+		if errors.Is(err, os.ErrNotExist) {
+			// tokens.json before the first token is minted, sing-box.json before the
+			// first render: absent is a normal state here, not a failure.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, SnapshotFile{Name: name, Data: data})
+	}
+	return append(out, SnapshotFile{Name: StatsFile, Data: stats}), nil
+}
 
 // DeleteUser removes a user and their usage history together. Usage lives in a
 // different backing store than users, so there are no foreign keys to do this for

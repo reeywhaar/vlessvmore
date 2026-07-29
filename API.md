@@ -35,6 +35,9 @@ unregistered path returns, and takes the same time to arrive. There is no `401` 
 never existed are all the same answer, on purpose — see
 [Refusals](#refusals) below.
 
+[`GET /backup`](#the-backup-port) is on a separate listener and is unauthenticated for the
+same reason the socket is: it is not exposed. Do not publish that port.
+
 ## Errors
 
 Non-2xx responses are `{"error": "<message>"}`.
@@ -571,3 +574,53 @@ something unremarkable. Matches only the exact root — unknown paths still `404
 ### `GET /sub/{token}`
 
 See [Subscriptions](#subscriptions) above.
+
+## The backup port
+
+`GET /backup` lives on a **listener of its own** — `backup_listen`, `:3000` by default —
+and is the only route that listener serves. It is not reachable on `api_listen` at all,
+and `api_listen`'s routes are not reachable on it.
+
+```sh
+curl -O -J http://vlessvmore:3000/backup
+```
+
+`200` with `Content-Type: application/gzip`, an accurate `Content-Length`, and
+`Content-Disposition: attachment; filename="vlessvmore-<YYYYMMDD_HHMMSS>.tgz"`. The
+archive mirrors the two directories a deployment mounts:
+
+| member | what |
+| --- | --- |
+| `config/config.json` | the mounted config file, byte for byte, when it is readable |
+| `data/identity.json` | the Reality keypair |
+| `data/users.json` | users, quotas, subscription tokens |
+| `data/tokens.json` | API token hashes |
+| `data/stats.db` | traffic history, self-contained, no `-wal` or `-shm` |
+| `data/sing-box.json` | the rendered sing-box config |
+
+Every member is a regular file with mode `0600`. There are no directory entries, so
+extracting cannot re-chmod directories that already exist, and files the deployment has
+not written yet are absent rather than empty. Errors are the usual `{"error": …}`, and
+anything other than `GET /backup` is a `404`.
+
+The archive is assembled in memory before the response starts, so a `200` is never a
+partial backup. `stats.db` is produced with `VACUUM INTO`, so it is a consistent database
+with its write-ahead log folded in — which is why this is safe on a running service while
+`tar`-ing the data directory from outside is not.
+
+**Unauthenticated, so the port must never be published.** Publishing it hands the Reality
+private key and every user UUID to anyone who can reach the host. It is meant for a
+sibling container on a private network; `"backup_listen": ""` turns it off entirely.
+
+Restore is an extract, not an endpoint — there is no `POST /restore`. Stop the service
+first, because writing over a live data directory corrupts it:
+
+```sh
+docker compose down
+tar xzf vlessvmore-20260729_031500.tgz -C /srv/vlessvmore
+docker compose up -d
+```
+
+See [Backup and moving hosts](README.md#backup-and-moving-hosts) for driving this from a
+backup tool, and [CLI.md](CLI.md#export--import) for `export`/`import`, which remain the
+right tool for moving to a *different* host.

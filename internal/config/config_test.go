@@ -33,6 +33,7 @@ func TestParseAppliesDefaults(t *testing.T) {
 		{"flow", cfg.FlowValue(), DefaultFlow},
 		{"fingerprint", cfg.Fingerprint, DefaultFingerprint},
 		{"api_listen", cfg.APIListen, DefaultAPIListen},
+		{"backup_listen", cfg.BackupListenValue(), DefaultBackupListen},
 		{"log_level", cfg.LogLevel, DefaultLogLevel},
 		{"stats_interval", time.Duration(cfg.StatsInterval), DefaultStatsInterval},
 	}
@@ -54,6 +55,7 @@ func TestParseKeepsExplicitValues(t *testing.T) {
   "fingerprint": "safari",
   "subscription_url_base": "https://sub.example.test",
   "api_listen": "127.0.0.1:8080",
+  "backup_listen": "127.0.0.1:9000",
   "log_level": "debug",
   "stats_interval": "5s",
   "template": "/etc/vlessvmore/singbox.json.tmpl"
@@ -86,6 +88,9 @@ func TestParseKeepsExplicitValues(t *testing.T) {
 	if cfg.Template != "/etc/vlessvmore/singbox.json.tmpl" {
 		t.Errorf("template = %q", cfg.Template)
 	}
+	if cfg.BackupListenValue() != "127.0.0.1:9000" {
+		t.Errorf("backup_listen = %q, want 127.0.0.1:9000", cfg.BackupListenValue())
+	}
 	// An explicit empty flow is a legitimate choice (plain vless, no vision), so
 	// it must survive rather than being defaulted back to vision — links generated
 	// from a silently-restored flow would not connect.
@@ -107,6 +112,22 @@ func TestOmittedFlowDefaultsToVision(t *testing.T) {
 	}
 	if cfg.FlowValue() != DefaultFlow {
 		t.Errorf("FlowValue() = %q, want %q", cfg.FlowValue(), DefaultFlow)
+	}
+}
+
+// An empty backup_listen means "do not serve /backup at all", so it must survive rather
+// than being defaulted back to a port. It also has to validate, since the port check
+// cannot run on an empty address.
+func TestEmptyBackupListenDisablesIt(t *testing.T) {
+	cfg, err := Parse(strings.NewReader(`{"host":"h","backup_listen":""}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.BackupListen == nil {
+		t.Fatal("an explicit empty backup_listen became nil")
+	}
+	if got := cfg.BackupListenValue(); got != "" {
+		t.Errorf("BackupListenValue() = %q, want empty", got)
 	}
 }
 
@@ -142,6 +163,9 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 		{"unsupported version", `{"version":99,"host":"h"}`, "version"},
 		{"negative stats interval", `{"host":"h","stats_interval":"-5s"}`, "stats_interval"},
 		{"api_listen not an address", `{"host":"h","api_listen":"http://x"}`, "api_listen"},
+		{"backup_listen not an address", `{"host":"h","backup_listen":"http://x"}`, "backup_listen"},
+		{"backup_listen port out of range", `{"host":"h","backup_listen":":70000"}`, "backup_listen"},
+		{"backup_listen collides with api_listen", `{"host":"h","api_listen":":3000"}`, "same port"},
 		{"subscription base has no scheme", `{"host":"h","subscription_url_base":"vpn.example.test"}`, "subscription_url_base"},
 		{"subscription base wrong scheme", `{"host":"h","subscription_url_base":"ftp://vpn.example.test"}`, "subscription_url_base"},
 		{"subscription base has no host", `{"host":"h","subscription_url_base":"https://"}`, "subscription_url_base"},

@@ -41,6 +41,7 @@ const (
 	DefaultFlow          = "xtls-rprx-vision"
 	DefaultFingerprint   = "chrome"
 	DefaultAPIListen     = ":80"
+	DefaultBackupListen  = ":3000"
 	DefaultLogLevel      = "info"
 	DefaultStatsInterval = 30 * time.Second
 	DefaultHandshakePort = 443
@@ -79,7 +80,18 @@ type Config struct {
 	// hostname Reality uses. Set it when the API lives somewhere else.
 	SubscriptionURLBase string `json:"subscription_url_base,omitempty"`
 
-	APIListen     string   `json:"api_listen"`
+	APIListen string `json:"api_listen"`
+
+	// BackupListen is where GET /backup serves a tgz of the whole deployment. A pointer
+	// for the same reason as Flow: nil means "omitted, use the default" and "" means
+	// "deliberately off".
+	//
+	// A port of its own rather than a route on api_listen, because api_listen is what a
+	// reverse proxy fronts on the public hostname while this endpoint hands out the
+	// Reality private key and every user UUID with no bearer token. Not being published
+	// is its only protection — reachable from a sibling container and nowhere else.
+	BackupListen *string `json:"backup_listen"`
+
 	LogLevel      string   `json:"log_level"`
 	StatsInterval Duration `json:"stats_interval"`
 
@@ -196,6 +208,10 @@ func (c *Config) applyDefaults() {
 	if c.APIListen == "" {
 		c.APIListen = DefaultAPIListen
 	}
+	if c.BackupListen == nil {
+		addr := DefaultBackupListen
+		c.BackupListen = &addr
+	}
 	if c.LogLevel == "" {
 		c.LogLevel = DefaultLogLevel
 	}
@@ -252,17 +268,37 @@ func (c *Config) Validate() error {
 	if c.StatsInterval <= 0 {
 		return fmt.Errorf("stats_interval must be positive, got %s", time.Duration(c.StatsInterval))
 	}
-	_, port, err := net.SplitHostPort(withDefaultHost(c.APIListen))
+	apiPort, err := listenPort("api_listen", c.APIListen)
 	if err != nil {
-		return fmt.Errorf("api_listen %q is not a host:port address: %w", c.APIListen, err)
+		return err
+	}
+	if backup := c.BackupListenValue(); backup != "" {
+		backupPort, err := listenPort("backup_listen", backup)
+		if err != nil {
+			return err
+		}
+		// Both would bind, one would lose, and the loser's failure arrives as a bare
+		// "address already in use" at startup.
+		if backupPort == apiPort {
+			return fmt.Errorf("backup_listen %q and api_listen %q are the same port", backup, c.APIListen)
+		}
+	}
+	return nil
+}
+
+// listenPort validates a listen address and returns its port.
+func listenPort(field, addr string) (int, error) {
+	_, port, err := net.SplitHostPort(withDefaultHost(addr))
+	if err != nil {
+		return 0, fmt.Errorf("%s %q is not a host:port address: %w", field, addr, err)
 	}
 	// SplitHostPort happily accepts "http://x" as host "http", port "//x", so the
 	// port has to be range-checked separately.
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
-		return fmt.Errorf("api_listen %q: port must be a number in 1-65535, got %q", c.APIListen, port)
+		return 0, fmt.Errorf("%s %q: port must be a number in 1-65535, got %q", field, addr, port)
 	}
-	return nil
+	return n, nil
 }
 
 // FlowValue is the vless flow to use, "" meaning none.
@@ -271,6 +307,14 @@ func (c *Config) FlowValue() string {
 		return DefaultFlow
 	}
 	return *c.Flow
+}
+
+// BackupListenValue is the address to serve /backup on, "" meaning do not serve it.
+func (c *Config) BackupListenValue() string {
+	if c.BackupListen == nil {
+		return DefaultBackupListen
+	}
+	return *c.BackupListen
 }
 
 // withDefaultHost lets ":80" validate as an address.

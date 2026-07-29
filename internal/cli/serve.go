@@ -102,7 +102,7 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 	defer collector.Close()
 	go collector.Run(ctx)
 
-	server := api.New(cfg, st, mgr, log)
+	server := api.New(cfg, configPath, st, mgr, log)
 
 	// Two listeners, two trust levels: the socket is unauthenticated because reaching
 	// it already means root in this container, the TCP port always requires a token.
@@ -117,7 +117,9 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 		Handler:           server.Handler(true),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	tcpErr := make(chan error, 1)
+	// Buffered for both senders, so the one that does not win the select still returns
+	// instead of blocking on a channel nobody reads again.
+	tcpErr := make(chan error, 2)
 	go func() {
 		log.Info("management api listening", "addr", cfg.APIListen, "socket", socketPath)
 		if err := tcpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -126,6 +128,28 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 		}
 		tcpErr <- nil
 	}()
+
+	// A third listener, unauthenticated like the socket, for the backup sidecar. It is
+	// only safe unpublished; see config.Config.BackupListen.
+	//
+	// Its failures share tcpErr because either listener dying is the same event: a
+	// misconfigured deployment that should stop rather than half-run.
+	var backupSrv *http.Server
+	if addr := cfg.BackupListenValue(); addr != "" {
+		backupSrv = &http.Server{
+			Addr:              addr,
+			Handler:           server.BackupHandler(),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			log.Info("backup listener listening", "addr", addr)
+			if err := backupSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				tcpErr <- fmt.Errorf("backup listener: %w", err)
+				return
+			}
+			tcpErr <- nil
+		}()
+	}
 
 	log.Info("vlessvmore started",
 		"host", cfg.Host, "port", cfg.Port, "data_dir", dataDir, "config", configPath)
@@ -143,6 +167,11 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 	defer cancel()
 	if err := tcpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("shutting down the management api", "error", err)
+	}
+	if backupSrv != nil {
+		if err := backupSrv.Shutdown(shutdownCtx); err != nil {
+			log.Error("shutting down the backup listener", "error", err)
+		}
 	}
 	return nil
 }

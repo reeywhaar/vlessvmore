@@ -217,6 +217,77 @@ cannot retype.
 A dump contains the server's private key and every user's UUID. Treat it as a secret.
 Details in [CLI.md](CLI.md#export--import).
 
+### The `/backup` endpoint
+
+`export` is a command someone has to remember to run. For scheduled backups there is a
+second HTTP listener — `backup_listen`, `:3000` by default — serving exactly one route:
+
+```sh
+curl -O -J http://vlessvmore:3000/backup
+```
+
+The response is a gzipped tar named `vlessvmore-<YYYYMMDD_HHMMSS>.tgz`, laid out as the
+two directories a deployment mounts:
+
+```
+config/config.json     the file you authored, byte for byte
+data/identity.json     the Reality keypair
+data/users.json        users, quotas, subscription tokens
+data/tokens.json       API token hashes
+data/stats.db          traffic history, a self-contained copy with no -wal
+data/sing-box.json     the rendered config (a build artifact; harmless to keep)
+```
+
+So a restore is an extract. Stop the service first — writing over a live data directory
+is how you corrupt one:
+
+```sh
+docker compose down
+tar xzf vlessvmore-20260729_031500.tgz -C /srv/vlessvmore
+docker compose up -d
+```
+
+Files a deployment has not written yet are simply absent from the archive; a fresh install
+with no tokens has no `data/tokens.json`. Everything is mode `0600`, and there are no
+directory entries, so extracting does not change the permissions of directories you
+already have.
+
+`stats.db` comes out of `VACUUM INTO`, not a file copy — a whole, consistent database with
+its write-ahead log already folded in. That is what makes extracting it safe, and it is
+the reason not to just `tar` the data directory yourself.
+
+The mechanics are deliberately plain, so any backup tool can drive it — cron and `curl`,
+restic, Kopia, a CI job, or the sidecar in [`backup/`](backup/):
+
+- **Plain `GET`, no parameters.** Success is `200` with `Content-Type: application/gzip`
+  and an accurate `Content-Length`; the archive is built fully in memory before the first
+  byte is sent, so a partial body never masquerades as a complete backup. Failure is a
+  `4xx`/`5xx` with a JSON `{"error": …}` body. Check the status code and you are done.
+- **Safe on a running service**, which archiving `data/` from outside is not.
+- **Stateless and repeatable.** No cursor, no locking, no cleanup. Call it as often as you
+  like; every response is a full backup.
+- **No authentication, by design.** Which is why the port must never be published. Give it
+  only to the container that backs it up:
+
+  ```yaml
+  services:
+    vlessvmore:
+      # note: :3000 is deliberately absent from `ports:`
+      networks: [caddy, backup-net]
+    mybackup:
+      networks: [backup-net]
+      environment:
+        VLESSVMORE_URL: http://vlessvmore:3000
+  ```
+
+  A bearer token would not add much here — anything that can reach the port is already
+  inside your network — and it would be one more secret to rotate. If you would rather not
+  serve it at all, set `"backup_listen": ""` and stay with `export`.
+
+The archive is a secret in the same way a dump is: it carries the Reality private key and
+every user UUID. Encrypt it before it leaves the host if the destination is not one you
+control.
+
 ## config.json
 
 ```json
@@ -230,6 +301,7 @@ Details in [CLI.md](CLI.md#export--import).
   "flow": "xtls-rprx-vision",
   "fingerprint": "chrome",
   "api_listen": ":80",
+  "backup_listen": ":3000",
   "log_level": "info",
   "stats_interval": "30s"
 }
@@ -244,6 +316,7 @@ Details in [CLI.md](CLI.md#export--import).
 | `handshake` | `<sni>:443` | the real TLS server traffic falls back to |
 | `flow` | `xtls-rprx-vision` | `""` for plain VLESS without vision |
 | `api_listen` | `:80` | management API bind address |
+| `backup_listen` | `:3000` | where [`/backup`](#the-backup-endpoint) is served; `""` to not serve it. **Never publish this port** |
 | `subscription_url_base` | `https://<host>` | origin clients fetch `/sub/<token>` from |
 | `cors_origins` | unset | origins allowed to call `/api` from a browser; `["*"]` for any |
 | `stats_interval` | `30s` | how often traffic is collected |

@@ -293,6 +293,19 @@ func (u *Usage) Compact(ctx context.Context) error {
 	return nil
 }
 
+// Snapshot writes a consistent copy of the database to dest, which must not already exist.
+//
+// VACUUM INTO rather than copying the file: in WAL mode the bytes in stats.db are only
+// part of the state, so a copy that does not capture the -wal at the same instant can be
+// torn. The output is one self-contained file with no -wal or -shm beside it, which is
+// what makes restoring it by extracting an archive safe.
+func (u *Usage) Snapshot(ctx context.Context, dest string) error {
+	if _, err := u.db.ExecContext(ctx, `VACUUM INTO ?`, dest); err != nil {
+		return fmt.Errorf("vacuum into %s: %w", dest, err)
+	}
+	return nil
+}
+
 // Row is one stored bucket, for export and import.
 type Row struct {
 	UserID string `json:"user_id"`

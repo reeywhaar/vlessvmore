@@ -29,6 +29,11 @@ services:
       # directly. The management API is not published at all — Caddy reaches it
       # over the shared network below.
       - "8443:8443"
+      # Deliberately absent: :3000, the backup listener. It serves GET /backup —
+      # a tgz containing the Reality private key and every user UUID — with no
+      # token at all, so not being published is its only protection. Reach it
+      # from a sibling container on a shared network, or set
+      # "backup_listen": "" in config.json to switch it off.
 
     volumes:
       # A directory rather than a single file: room for more than config.json
