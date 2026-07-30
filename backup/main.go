@@ -24,7 +24,8 @@ import (
 )
 
 // defaultBackupDir is where archives are kept locally. Mount a volume over it to keep
-// copies that do not depend on the remote being reachable.
+// copies that do not depend on the remote being reachable; see resolveBackupDir for what
+// happens when nothing is mounted there.
 const defaultBackupDir = "/backups"
 
 // fetchTimeout bounds the download. Generous, because the server builds the archive
@@ -33,6 +34,7 @@ const fetchTimeout = 5 * time.Minute
 
 type config struct {
 	dir          string
+	keepLocal    bool
 	source       string
 	url          string
 	provider     string
@@ -50,7 +52,6 @@ func main() {
 
 func backup() error {
 	cfg := config{
-		dir:          envOr("BACKUP_DIR", defaultBackupDir),
 		source:       envOr("VLESSVMORE_URL", "http://vlessvmore:3000"),
 		url:          envOr("BACKIO_URL", "http://backio:8080"),
 		provider:     envOr("BACKIO_PROVIDER", "gdrive"),
@@ -64,8 +65,15 @@ func backup() error {
 
 	log("backup", "Starting backup")
 
-	if err := os.MkdirAll(cfg.dir, 0o700); err != nil {
+	dir, keepLocal, err := resolveBackupDir(defaultBackupDir, cfg.token)
+	if err != nil {
 		return err
+	}
+	cfg.dir, cfg.keepLocal = dir, keepLocal
+	if !keepLocal {
+		// The archive still has to land on disk to be encrypted and uploaded; it just does
+		// not outlive the run.
+		defer os.RemoveAll(dir)
 	}
 
 	ts := timestamp()
@@ -102,9 +110,45 @@ func backup() error {
 		return err
 	}
 
-	cleanupLocalBackups(cfg)
+	if cfg.keepLocal {
+		cleanupLocalBackups(cfg)
+	}
 	cleanupRemoteBackups(cfg)
 	return nil
+}
+
+// resolveBackupDir decides where the archive is written and whether it stays there.
+//
+// The image does not create /backups, and Docker creates a mount target that the image is
+// missing, so the directory exists exactly when something is mounted over it. Without it,
+// local copies would sit in the container's writable layer, where they vanish the moment
+// the container is recreated — the one time a local copy would have been useful. The
+// archive goes to a temp directory the run deletes on its way out instead.
+//
+// An explicit BACKUP_DIR is always kept, and created if it is missing: a path someone
+// named is a path someone wants.
+func resolveBackupDir(defaultDir, token string) (string, bool, error) {
+	if dir := os.Getenv("BACKUP_DIR"); dir != "" {
+		return dir, true, os.MkdirAll(dir, 0o700)
+	}
+	if isDir(defaultDir) {
+		return defaultDir, true, nil
+	}
+	// Nowhere to keep the archive and nowhere to send it: the run would fetch a backup
+	// only to delete it. Better said once an interval than done once an interval.
+	if token == "" {
+		return "", false, fmt.Errorf("no %s directory and BACKUP_TOKEN is not set: "+
+			"mount a volume for local copies, or set a token to upload", defaultDir)
+	}
+
+	log("backup", "No "+defaultDir+" directory: uploading without keeping a local copy")
+	dir, err := os.MkdirTemp("", "vlessvmore-backup-")
+	return dir, false, err
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // fetch downloads the archive to a .part file and renames it on success, so an

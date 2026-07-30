@@ -367,10 +367,18 @@ ghcr.io/reeywhaar/vlessvmore-backup:latest
 | `BACKIO_PROVIDER` | `gdrive` | rclone remote name |
 | `BACKUP_TOKEN` | unset | backio token; **unset means local copies only, no upload** |
 | `BACKUP_PASSWORD` | unset | when set, upload a 7z AES-256 `.zip` instead of the plain `.tgz` |
-| `BACKUP_DIR` | `/backups` | where local copies are kept |
+| `BACKUP_DIR` | `/backups` | where local copies are kept; set it and copies are always kept there |
 
 Archives are named `vlessvmore-<YYYYMMDD_HHMMSS>.<tgz|zip>`, mode `0600`, and kept in
 `/backups` — mount a volume there for copies that survive the remote being unreachable.
+
+**Mount nothing at `/backups` and no local copies are kept at all.** The image does not
+create that directory and Docker creates a mount target that the image is missing, so the
+directory exists exactly when a volume is mounted over it. Without one, each archive goes to
+a temp directory that the run deletes once the upload is done — a copy in the container's
+writable layer would vanish with the container anyway, which is the one moment a local copy
+would have earned its keep. With neither a volume nor a `BACKUP_TOKEN` there is nowhere to
+put the archive, and the run says so and exits non-zero rather than backing up to nothing.
 
 **Retention, applied to both the local directory and the remote:** the three newest
 archives from the newest day, the newest archive of each of the three newest days, and the

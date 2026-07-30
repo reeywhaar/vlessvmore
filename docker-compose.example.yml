@@ -107,8 +107,8 @@ services:
 
     volumes:
       # Local copies, rotated by the same retention policy as the remote: 3 from the
-      # newest day, 3 daily, 1 weekly, 1 monthly. Drop this mount to keep backups
-      # remote-only.
+      # newest day, 3 daily, 1 weekly, 1 monthly. Drop this mount and no local copies are
+      # kept at all — each archive is uploaded from a temp directory and deleted.
       - ./backups:/backups
 
     networks:

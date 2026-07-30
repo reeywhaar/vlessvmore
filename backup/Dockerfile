@@ -26,8 +26,8 @@ RUN apk add --no-cache ca-certificates 7zip
 COPY --from=builder /out/backup /backup
 COPY --chmod=0755 backup/backup_loop.sh /backup_loop.sh
 
-# Local copies, rotated by the same retention policy as the remote. Mount a volume here
-# to keep a backup that does not depend on the remote being reachable.
-VOLUME /backups
-
+# No `VOLUME /backups`, and the directory is deliberately not created here either. Docker
+# creates a mount target the image is missing, so an existing /backups means a volume is
+# mounted and the sidecar keeps local copies; no directory means it uploads and keeps none.
+# `VOLUME` would break that by conjuring an anonymous volume nobody named and nothing prunes.
 CMD ["/backup_loop.sh"]
