@@ -372,10 +372,15 @@ ghcr.io/reeywhaar/vlessvmore-backup:latest
 Archives are named `vlessvmore-<YYYYMMDD_HHMMSS>.<tgz|zip>`, mode `0600`, and kept in
 `/backups` — mount a volume there for copies that survive the remote being unreachable.
 
-**Retention, applied to both the local directory and the remote:** the newest archive from
-each of the last three days it has one for, plus one at least a week old and one at least a
-month old. So five archives at most, whatever the interval. Each slot falls back to the
-oldest archive when nothing qualifies, so a young deployment deletes nothing.
+**Retention, applied to both the local directory and the remote:** the three newest
+archives from the newest day, the newest archive of each of the three newest days, and the
+newest archive of the previous week and the previous month. So seven archives at most,
+whatever the interval.
+
+Every slot is a calendar bucket keeper — the newest archive of a day, an ISO week, a month —
+rather than an archive of a given age. A bucket's keeper is settled once the bucket ends, so
+each run prunes to the same set the last one did, and the week and month slots hold real
+week- and month-old copies instead of whatever the first run happened to pin.
 
 Pruning the remote needs `read` and `delete` on the backio token; with a `create`-only
 token the uploads still work and the remote simply is not pruned:

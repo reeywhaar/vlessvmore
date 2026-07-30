@@ -5,8 +5,8 @@
 // restarts instead.
 //
 // A close sibling of github.com/Reeywhaar/vaultwarden_backup, deliberately: same
-// environment variables, same log format, same retention policy, so the two behave alike
-// wherever they run side by side.
+// environment variables, same log format, so the two behave alike wherever they run side
+// by side. Retention differs — see retention.go.
 package main
 
 import (
@@ -147,14 +147,14 @@ func fetch(source, dest string) error {
 }
 
 func cleanupLocalBackups(cfg config) {
-	log("cleanup", "Running local retention policy: 3 daily, 1 weekly, 1 monthly")
+	log("cleanup", "Running local retention policy: 3 today, 3 daily, 1 weekly, 1 monthly")
 
 	names, err := listLocalBackups(cfg.dir)
 	if err != nil {
 		logError("cleanup", "Failed to list local backups: "+err.Error())
 		return
 	}
-	for _, name := range toRemove(names, time.Now()) {
+	for _, name := range toRemove(names) {
 		log("cleanup", "Removing local: "+name)
 		if err := os.Remove(filepath.Join(cfg.dir, name)); err != nil {
 			logError("cleanup", fmt.Sprintf("Failed to remove local %s: %s", name, err))
@@ -166,14 +166,14 @@ func cleanupRemoteBackups(cfg config) {
 	if cfg.token == "" {
 		return
 	}
-	log("remote", "Running remote retention policy: 3 daily, 1 weekly, 1 monthly")
+	log("remote", "Running remote retention policy: 3 today, 3 daily, 1 weekly, 1 monthly")
 
 	names, err := listBackioBackups(cfg)
 	if err != nil {
 		logError("remote", "Failed to list remote backups: "+err.Error())
 		return
 	}
-	for _, name := range toRemove(names, time.Now()) {
+	for _, name := range toRemove(names) {
 		log("remote", "Removing remote: "+name)
 		if err := deleteBackioBackup(name, cfg); err != nil {
 			logError("remote", fmt.Sprintf("Failed to delete remote %s: %s", name, err))

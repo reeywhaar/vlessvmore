@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -48,58 +49,97 @@ func parseDateFromName(name string) (time.Time, bool) {
 	return time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, time.UTC), true
 }
 
-// dailySlots is how many calendar days keep an archive.
-const dailySlots = 3
+// Retention slots. Every slot is defined against the archives that exist rather than
+// against the wall clock, because each run prunes what the last run left behind: a
+// bucket's keeper is the newest archive in it, and no later archive can land in an
+// earlier bucket, so the keeper is settled the moment its bucket ends.
+//
+// Age windows cannot do that. "The newest archive at least a week old" deletes every
+// archive that is four days old — too new for the window, too old for the day slots —
+// so nothing survives to reach a week and the slot only ever holds whatever the first
+// run happened to pin.
+const (
+	// currentDaySlots is how many of the newest archives from the newest day are kept.
+	// Everything else that day is pruned, however short the interval.
+	currentDaySlots = 3
+	// daySlots is how many calendar days keep their newest archive.
+	daySlots = 3
+	// weekSlots and monthSlots count calendar buckets, and the newest bucket's keeper is
+	// the newest archive overall, already held by the day slots. Two buckets each is
+	// therefore one week-old copy and one month-old copy.
+	weekSlots  = 2
+	monthSlots = 2
+)
 
-// selectBackupsToKeep applies the retention policy: one archive for each of the last
-// three days that has one, plus one at least a week old and one at least a month old.
+func dayKey(t time.Time) string { return t.Format("2006-01-02") }
+
+func weekKey(t time.Time) string {
+	year, week := t.ISOWeek()
+	return fmt.Sprintf("%04d-W%02d", year, week)
+}
+
+func monthKey(t time.Time) string { return t.Format("2006-01") }
+
+// selectBackupsToKeep applies the retention policy: the three newest archives from the
+// newest day, the newest archive of each of the three newest days, and the newest archive
+// of the second-newest week and month. Seven archives at most, whatever the interval.
 //
-// Expects backups sorted newest first. Days rather than "the three newest files", because
-// at an hourly cadence the three newest files cover three hours.
-//
-// Each slot falls back to the oldest archive when nothing qualifies, so a young
-// deployment converges on keeping everything rather than deleting its only history.
-func selectBackupsToKeep(backups []backupEntry, now time.Time) map[string]bool {
+// Expects backups sorted newest first.
+func selectBackupsToKeep(backups []backupEntry) map[string]bool {
 	keep := map[string]bool{}
 	if len(backups) == 0 {
 		return keep
 	}
 
-	// Newest first, so the first archive seen on a day is that day's keeper.
-	days := 0
-	seenDay := ""
-	for _, b := range backups {
-		day := b.date.Format("2006-01-02")
-		if day == seenDay {
-			continue
-		}
-		seenDay = day
-		keep[b.name] = true
-		if days++; days == dailySlots {
+	// The newest archive's day rather than today's date, so a loop that stopped a week ago
+	// keeps the last day it managed instead of leaving the slot empty.
+	day := dayKey(backups[0].date)
+	for i, b := range backups {
+		if i == currentDaySlots || dayKey(b.date) != day {
 			break
 		}
+		keep[b.name] = true
 	}
 
-	oldest := backups[len(backups)-1].name
-	keep[firstOlderThan(backups, now, 7*24*time.Hour, oldest)] = true
-	keep[firstOlderThan(backups, now, 30*24*time.Hour, oldest)] = true
+	for _, slot := range []struct {
+		n   int
+		key func(time.Time) string
+	}{
+		{daySlots, dayKey},
+		{weekSlots, weekKey},
+		{monthSlots, monthKey},
+	} {
+		for _, name := range bucketKeepers(backups, slot.n, slot.key) {
+			keep[name] = true
+		}
+	}
 	return keep
 }
 
-// firstOlderThan returns the newest archive at least age old, or fallback if there is none.
-func firstOlderThan(backups []backupEntry, now time.Time, age time.Duration, fallback string) string {
+// bucketKeepers returns the newest archive from each of the n newest buckets, where key
+// puts an archive in a bucket. Expects backups sorted newest first, so the first archive
+// seen in a bucket is that bucket's keeper and a bucket's archives are contiguous.
+func bucketKeepers(backups []backupEntry, n int, key func(time.Time) string) []string {
+	var out []string
+	seen := ""
 	for _, b := range backups {
-		if now.Sub(b.date) >= age {
-			return b.name
+		bucket := key(b.date)
+		if bucket == seen {
+			continue
+		}
+		seen = bucket
+		out = append(out, b.name)
+		if len(out) == n {
+			break
 		}
 	}
-	return fallback
+	return out
 }
 
 // toRemove is the set difference the callers actually want: everything recognisable that
 // no slot claimed. Unrecognisable names are left alone — they are not ours to delete.
-func toRemove(names []string, now time.Time) []string {
-	keep := selectBackupsToKeep(parseEntries(names), now)
+func toRemove(names []string) []string {
+	keep := selectBackupsToKeep(parseEntries(names))
 	var out []string
 	for _, name := range names {
 		if nameRe.MatchString(name) && !keep[name] {

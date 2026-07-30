@@ -106,8 +106,9 @@ services:
       - vlessvmore
 
     volumes:
-      # Local copies, rotated by the same retention policy as the remote: 3 daily,
-      # 1 weekly, 1 monthly. Drop this mount to keep backups remote-only.
+      # Local copies, rotated by the same retention policy as the remote: 3 from the
+      # newest day, 3 daily, 1 weekly, 1 monthly. Drop this mount to keep backups
+      # remote-only.
       - ./backups:/backups
 
     networks:
