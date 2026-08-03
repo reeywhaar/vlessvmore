@@ -58,19 +58,19 @@ manager that generates sing-box's config from a user list you edit through an AP
 ## How it fits together
 
 ```
-                            :8443  VLESS/Reality  ←── clients
-                              │
-  ┌───────────────────────────┴─────────────────────────────────┐
-  │ container                                                   │
-  │                                                             │
-  │  config.json ──┐                                            │
-  │  (yours, :ro)  ├──→ renders ──→ sing-box.json ──→ sing-box   │
-  │  users.json ───┘      ▲                                     │
-  │                       │                    v2ray_api gRPC   │
-  │  manager ─────────────┘        ←──── per-user traffic ───────┤
-  │    ├── :80              HTTP API (bearer token)              │
-  │    └── unix socket      the CLI                              │
-  └─────────────────────────────────────────────────────────────┘
+                                                            clients
+                                                               │  :8443 VLESS/Reality
+  ┌────────────────────────────────────────────────────────────┴───┐
+  │ container                                                  │   │
+  │  config.json ─┐                                            ▼   │
+  │  (yours, :ro) ├─→ manager ─renders─→ sing-box.json ─→ sing-box │
+  │  users.json ──┘   │  ▲                                     │   │
+  │                   │  └─ per-user traffic (v2ray_api gRPC) ─┘   │
+  │                   │                                            │
+  │                   ├── :80          HTTP API (bearer token)     │
+  │                   ├── :3000        /backup                     │
+  │                   └── unix socket  the CLI                     │
+  └────────────────────────────────────────────────────────────────┘
 ```
 
 Two config files exist and they are **different things**:
