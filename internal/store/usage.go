@@ -19,6 +19,9 @@ const BucketSeconds = 3600
 
 // Usage is the SQLite-backed traffic history. It is the only store that needs a
 // database: it is append-heavy and every read is an aggregate.
+//
+// It also keeps what was last sent to a backup store, which is not traffic and is here for
+// a different reason — see the second migration.
 type Usage struct {
 	db *sql.DB
 }
@@ -78,6 +81,25 @@ CREATE TABLE usage (
 ) WITHOUT ROWID;
 
 CREATE INDEX usage_bucket ON usage(bucket);
+`,
+	// What was last accepted by a backup store, so an unchanged deployment is not sent
+	// again.
+	//
+	// Here rather than beside the users in the data directory, and that is the whole of why
+	// this table lives in this file. The question a backup asks is "have the JSON files
+	// changed since the last push", answered by hashing them — so writing the answer into
+	// one of them would change the thing being asked about, and every check would find a
+	// change it had caused itself. Kept in stats.db, the question stays about what somebody
+	// set. See internal/backup.
+	//
+	// Losing it costs one redundant upload, which is the right way round for the one file
+	// here that is already treated as reconstructible.
+	`
+CREATE TABLE backup_state (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  digest    BLOB    NOT NULL,
+  pushed_at INTEGER NOT NULL
+);
 `,
 }
 
@@ -358,4 +380,35 @@ func (u *Usage) Import(ctx context.Context, rows []Row) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// LastBackup is the digest of the deployment's state as it was when a copy was last
+// accepted by a backup store, and when that was. A nil digest means none ever has been.
+func (u *Usage) LastBackup(ctx context.Context) (digest []byte, at time.Time, err error) {
+	var unix int64
+	row := u.db.QueryRowContext(ctx, `SELECT digest, pushed_at FROM backup_state WHERE singleton = 1`)
+	if err := row.Scan(&digest, &unix); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, time.Time{}, nil
+		}
+		return nil, time.Time{}, fmt.Errorf("read backup state: %w", err)
+	}
+	return digest, time.Unix(unix, 0).UTC(), nil
+}
+
+// RecordBackup remembers what was sent, so an unchanged deployment is not sent again.
+//
+// Written only after the backup store has accepted the archive. Recorded before, a
+// rejected upload would leave this process believing a copy exists that does not — and in
+// a deployment nobody is editing, the next change to a user would be the only thing that
+// ever made it try again.
+func (u *Usage) RecordBackup(ctx context.Context, digest []byte, at time.Time) error {
+	_, err := u.db.ExecContext(ctx, `
+INSERT INTO backup_state (singleton, digest, pushed_at) VALUES (1, ?, ?)
+ON CONFLICT(singleton) DO UPDATE SET digest = excluded.digest, pushed_at = excluded.pushed_at`,
+		digest, at.UTC().Unix())
+	if err != nil {
+		return fmt.Errorf("record backup state: %w", err)
+	}
+	return nil
 }

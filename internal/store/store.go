@@ -6,7 +6,9 @@
 //     They are small, they change rarely, and an operator can read or repair them with a
 //     text editor — which matters when something has gone wrong at 3am.
 //   - stats.db is SQLite, because usage is the only data here that is high-volume,
-//     append-heavy and needs real aggregation (sum over a range, roll up by day).
+//     append-heavy and needs real aggregation (sum over a range, roll up by day). It also
+//     holds what was last backed up, which is there to stay out of the files a backup
+//     hashes rather than because it needs a database; see internal/backup.
 //
 // config.json remains the source of truth for how the server is reachable; nothing
 // in this package touches it.
@@ -97,23 +99,14 @@ type SnapshotFile struct {
 // concurrent change yields either the old or the new file and never half of one; no
 // invariant spans two of them, so reading them one at a time is enough.
 //
-// stats.db goes through Usage.Snapshot, being the one file a plain copy can tear.
-func (s *Store) Snapshot(ctx context.Context) ([]SnapshotFile, error) {
-	tmp, err := os.MkdirTemp("", "vlessvmore-snapshot")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmp)
-
-	statsPath := filepath.Join(tmp, StatsFile)
-	if err := s.Usage.Snapshot(ctx, statsPath); err != nil {
-		return nil, err
-	}
-	stats, err := os.ReadFile(statsPath)
-	if err != nil {
-		return nil, err
-	}
-
+// stats is optional and off unless asked for, which is the split between the two kinds of
+// file here showing up in the backup policy: the JSON files are what somebody set and
+// cannot be recovered from anywhere, stats.db is what the collector measured. It is also
+// the only expensive half — the JSON files are a few kilobytes read straight off disk,
+// while stats.db goes through Usage.Snapshot's `VACUUM INTO`, being the one file a plain
+// copy can tear. Asking for the cheap half alone is what makes "has anything changed?"
+// cheap to answer; see internal/backup.
+func (s *Store) Snapshot(ctx context.Context, stats bool) ([]SnapshotFile, error) {
 	// Identity first: it is the file that must survive, so it should be the first thing
 	// out and the first thing back in.
 	var out []SnapshotFile
@@ -129,7 +122,25 @@ func (s *Store) Snapshot(ctx context.Context) ([]SnapshotFile, error) {
 		}
 		out = append(out, SnapshotFile{Name: name, Data: data})
 	}
-	return append(out, SnapshotFile{Name: StatsFile, Data: stats}), nil
+	if !stats {
+		return out, nil
+	}
+
+	tmp, err := os.MkdirTemp("", "vlessvmore-snapshot")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+
+	statsPath := filepath.Join(tmp, StatsFile)
+	if err := s.Usage.Snapshot(ctx, statsPath); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(statsPath)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, SnapshotFile{Name: StatsFile, Data: data}), nil
 }
 
 // DeleteUser removes a user and their usage history together. Usage lives in a

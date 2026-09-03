@@ -26,18 +26,15 @@ import (
 
 // Server holds everything the handlers need.
 type Server struct {
-	cfg *config.Config
-	// configPath is where cfg was loaded from, so a backup can carry the file itself
-	// rather than a re-marshalled copy of the parsed struct. Empty when unknown.
-	configPath string
-	store      *store.Store
-	manager    *singbox.Manager
-	log        *slog.Logger
+	cfg     *config.Config
+	store   *store.Store
+	manager *singbox.Manager
+	log     *slog.Logger
 }
 
 // New builds a server.
-func New(cfg *config.Config, configPath string, st *store.Store, mgr *singbox.Manager, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, configPath: configPath, store: st, manager: mgr, log: log}
+func New(cfg *config.Config, st *store.Store, mgr *singbox.Manager, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, store: st, manager: mgr, log: log}
 }
 
 // Handler returns the routes. When requireAuth is false every request is treated as

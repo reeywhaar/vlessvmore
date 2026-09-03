@@ -35,16 +35,97 @@ const DefaultPath = "/etc/vlessvmore/config.json"
 // PathEnv overrides DefaultPath.
 const PathEnv = "VLESSVMORE_CONFIG"
 
+// BackupMode is what goes into a backup archive, and what makes one happen.
+//
+// Two questions with three useful answers between them, rather than two switches with a
+// meaningless fourth combination. "stats only, when a user changes" is not a policy anybody
+// wants, and a pair of booleans would offer it.
+type BackupMode string
+
+const (
+	// BackupState carries the JSON files alone: the Reality keypair, the users, the API
+	// token hashes and the config the server was started with.
+	//
+	// The smallest thing worth keeping, and the part that cannot be rebuilt from anywhere.
+	BackupState BackupMode = "state"
+
+	// BackupRelaxed carries stats.db too, and is the default.
+	//
+	// Traffic history comes along for the ride but never decides that a copy is due. What
+	// it holds is measurement rather than intent: an instance restored without it forgets
+	// how much everybody has used this month, which resets quota windows and loses a graph,
+	// but hands out no broken links. Cheap enough to carry, so carried; not worth waking up
+	// for, so it wakes nothing.
+	BackupRelaxed BackupMode = "relaxed"
+
+	// BackupAll is relaxed with a floor under it: a copy at least every [BackupAllPeriod],
+	// whether or not anybody touched a user.
+	//
+	// The one mode that sends an archive when nothing a person did has changed. Traffic is
+	// the thing the change check never sees — a server nobody administers for a week still
+	// meters every byte through it, and to a check that hashes the JSON files that week
+	// looks exactly like an idle one. For an operator who wants usage kept closely rather
+	// than as of the last time somebody added a user.
+	BackupAll BackupMode = "all"
+)
+
+// How long a copy waits, and how long a deployment can go without one.
+//
+// Constants, not settings, and deliberately. Neither is a number an operator can reason
+// about better than this program can: the delay trades "how much of a burst becomes one
+// archive" against "how long a change sits uncopied", and the floor exists only to catch
+// traffic, which the change check never sees. Both have one right answer on every
+// deployment this runs on, and a knob would mostly be a way to set them wrong.
+//
+// What an operator actually chooses is which of those promises they want, and that is
+// backup_mode.
+const (
+	// BackupDelay is how long after a change the copy goes out, in every mode.
+	//
+	// A delay and a throttle at once: nothing here reacts to a write, so an operator adding
+	// six users in a minute gets one archive holding all six rather than six archives.
+	BackupDelay = 5 * time.Minute
+
+	// BackupAllPeriod is how long [BackupAll] will go without sending anything.
+	BackupAllPeriod = 30 * time.Minute
+)
+
+// Valid reports whether m is a mode this build knows.
+func (m BackupMode) Valid() bool {
+	return m == BackupState || m == BackupRelaxed || m == BackupAll
+}
+
+// Stats reports whether the archive carries stats.db.
+func (m BackupMode) Stats() bool { return m == BackupRelaxed || m == BackupAll }
+
+// Period is how long a mode will go without sending anything, or zero for no floor at all.
+//
+// Only [BackupAll] has one. Every mode sends when the deployment changes; this is the extra
+// promise one of them makes on top.
+func (m BackupMode) Period() time.Duration {
+	if m == BackupAll {
+		return BackupAllPeriod
+	}
+	return 0
+}
+
 // Defaults applied when a field is omitted.
 const (
 	DefaultPort          = 8443
 	DefaultFlow          = "xtls-rprx-vision"
 	DefaultFingerprint   = "chrome"
 	DefaultAPIListen     = ":80"
-	DefaultBackupListen  = ":3000"
 	DefaultLogLevel      = "info"
 	DefaultStatsInterval = 30 * time.Second
 	DefaultHandshakePort = 443
+
+	// DefaultBackupMode carries every file and copies them when a user, token, key or the
+	// config changes.
+	//
+	// Relaxed rather than state, because stats.db is small next to the reason anybody runs
+	// this — a year of hourly buckets for fifty users is a couple of megabytes — and an
+	// archive without it restores a server whose quota windows have all silently reset.
+	DefaultBackupMode = BackupRelaxed
 )
 
 // Config is the parsed config.json.
@@ -82,15 +163,23 @@ type Config struct {
 
 	APIListen string `json:"api_listen"`
 
-	// BackupListen is where GET /backup serves a tgz of the whole deployment. A pointer
-	// for the same reason as Flow: nil means "omitted, use the default" and "" means
-	// "deliberately off".
+	// BackupURL is where an archive is posted, or empty for no backups at all — a backup
+	// agent's endpoint, so on a compose network something like "http://backup:8080/backup".
 	//
-	// A port of its own rather than a route on api_listen, because api_listen is what a
-	// reverse proxy fronts on the public hostname while this endpoint hands out the
-	// Reality private key and every user UUID with no bearer token. Not being published
-	// is its only protection — reachable from a sibling container and nowhere else.
-	BackupListen *string `json:"backup_listen"`
+	// The whole address rather than a host, because the endpoint is the agent's to name and
+	// this program should not be the place that knows the path it happens to serve today.
+	//
+	// Nothing is backed up unless this is set. There is no default, because a default would
+	// be a guess at a hostname on a network this program cannot see, and the failure it
+	// produces is a log line every few minutes about somewhere nobody meant to send
+	// anything.
+	//
+	// Not a secret, which is what keeps it in this file: the credential for the remote
+	// belongs to the agent, and this end holds nothing but an address on a private network.
+	BackupURL string `json:"backup_url,omitempty"`
+
+	// BackupMode is what the archive carries, and what makes one happen. See [BackupMode].
+	BackupMode BackupMode `json:"backup_mode,omitempty"`
 
 	LogLevel      string   `json:"log_level"`
 	StatsInterval Duration `json:"stats_interval"`
@@ -208,9 +297,8 @@ func (c *Config) applyDefaults() {
 	if c.APIListen == "" {
 		c.APIListen = DefaultAPIListen
 	}
-	if c.BackupListen == nil {
-		addr := DefaultBackupListen
-		c.BackupListen = &addr
+	if c.BackupMode == "" {
+		c.BackupMode = DefaultBackupMode
 	}
 	if c.LogLevel == "" {
 		c.LogLevel = DefaultLogLevel
@@ -268,19 +356,26 @@ func (c *Config) Validate() error {
 	if c.StatsInterval <= 0 {
 		return fmt.Errorf("stats_interval must be positive, got %s", time.Duration(c.StatsInterval))
 	}
-	apiPort, err := listenPort("api_listen", c.APIListen)
-	if err != nil {
+	if _, err := listenPort("api_listen", c.APIListen); err != nil {
 		return err
 	}
-	if backup := c.BackupListenValue(); backup != "" {
-		backupPort, err := listenPort("backup_listen", backup)
+	if !c.BackupMode.Valid() {
+		return fmt.Errorf("backup_mode %q is not one of state, relaxed or all", c.BackupMode)
+	}
+	if c.BackupURL != "" {
+		u, err := url.Parse(c.BackupURL)
 		if err != nil {
-			return err
+			return fmt.Errorf("backup_url %q is not a URL: %w", c.BackupURL, err)
 		}
-		// Both would bind, one would lose, and the loser's failure arrives as a bare
-		// "address already in use" at startup.
-		if backupPort == apiPort {
-			return fmt.Errorf("backup_listen %q and api_listen %q are the same port", backup, c.APIListen)
+		// The scheme is required rather than assumed. A bare "backup:8080/backup" parses
+		// as a relative path with no host at all, and the request that produces fails at
+		// the first push rather than at startup, which is the wrong end of the day to find
+		// out that nothing has ever been backed up.
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("backup_url %q must start with http:// or https://", c.BackupURL)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("backup_url %q has no host", c.BackupURL)
 		}
 	}
 	return nil
@@ -307,14 +402,6 @@ func (c *Config) FlowValue() string {
 		return DefaultFlow
 	}
 	return *c.Flow
-}
-
-// BackupListenValue is the address to serve /backup on, "" meaning do not serve it.
-func (c *Config) BackupListenValue() string {
-	if c.BackupListen == nil {
-		return DefaultBackupListen
-	}
-	return *c.BackupListen
 }
 
 // withDefaultHost lets ":80" validate as an address.

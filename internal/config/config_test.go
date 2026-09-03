@@ -33,7 +33,8 @@ func TestParseAppliesDefaults(t *testing.T) {
 		{"flow", cfg.FlowValue(), DefaultFlow},
 		{"fingerprint", cfg.Fingerprint, DefaultFingerprint},
 		{"api_listen", cfg.APIListen, DefaultAPIListen},
-		{"backup_listen", cfg.BackupListenValue(), DefaultBackupListen},
+		{"backup_url", cfg.BackupURL, ""},
+		{"backup_mode", cfg.BackupMode, DefaultBackupMode},
 		{"log_level", cfg.LogLevel, DefaultLogLevel},
 		{"stats_interval", time.Duration(cfg.StatsInterval), DefaultStatsInterval},
 	}
@@ -55,7 +56,8 @@ func TestParseKeepsExplicitValues(t *testing.T) {
   "fingerprint": "safari",
   "subscription_url_base": "https://sub.example.test",
   "api_listen": "127.0.0.1:8080",
-  "backup_listen": "127.0.0.1:9000",
+  "backup_url": "http://backup:8080/backup",
+  "backup_mode": "all",
   "log_level": "debug",
   "stats_interval": "5s",
   "template": "/etc/vlessvmore/singbox.json.tmpl"
@@ -88,8 +90,11 @@ func TestParseKeepsExplicitValues(t *testing.T) {
 	if cfg.Template != "/etc/vlessvmore/singbox.json.tmpl" {
 		t.Errorf("template = %q", cfg.Template)
 	}
-	if cfg.BackupListenValue() != "127.0.0.1:9000" {
-		t.Errorf("backup_listen = %q, want 127.0.0.1:9000", cfg.BackupListenValue())
+	if cfg.BackupURL != "http://backup:8080/backup" {
+		t.Errorf("backup_url = %q", cfg.BackupURL)
+	}
+	if cfg.BackupMode != BackupAll {
+		t.Errorf("backup_mode = %q, want all", cfg.BackupMode)
 	}
 	// An explicit empty flow is a legitimate choice (plain vless, no vision), so
 	// it must survive rather than being defaulted back to vision — links generated
@@ -115,19 +120,50 @@ func TestOmittedFlowDefaultsToVision(t *testing.T) {
 	}
 }
 
-// An empty backup_listen means "do not serve /backup at all", so it must survive rather
-// than being defaulted back to a port. It also has to validate, since the port check
-// cannot run on an empty address.
-func TestEmptyBackupListenDisablesIt(t *testing.T) {
-	cfg, err := Parse(strings.NewReader(`{"host":"h","backup_listen":""}`))
+// An omitted backup_url is the off switch, and it has to survive applyDefaults: a default
+// here would be a guess at a hostname on a network this program cannot see, and the failure
+// it produces is a log line every few minutes about somewhere nobody meant to send anything.
+func TestOmittedBackupURLStaysOff(t *testing.T) {
+	cfg, err := Parse(strings.NewReader(minimal))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if cfg.BackupListen == nil {
-		t.Fatal("an explicit empty backup_listen became nil")
+	if cfg.BackupURL != "" {
+		t.Errorf("backup_url defaulted to %q, want empty", cfg.BackupURL)
 	}
-	if got := cfg.BackupListenValue(); got != "" {
-		t.Errorf("BackupListenValue() = %q, want empty", got)
+	// The mode still gets one, so a deployment that later sets a URL does not also have to
+	// discover that it needs a mode.
+	if cfg.BackupMode != DefaultBackupMode {
+		t.Errorf("backup_mode = %q, want %q", cfg.BackupMode, DefaultBackupMode)
+	}
+}
+
+// Every mode has to answer both questions the pusher asks of it, and a mode that carries
+// nothing or promises a floor it does not keep would be found only at run time.
+func TestBackupModes(t *testing.T) {
+	tests := []struct {
+		mode   BackupMode
+		valid  bool
+		stats  bool
+		period time.Duration
+	}{
+		{BackupState, true, false, 0},
+		{BackupRelaxed, true, true, 0},
+		{BackupAll, true, true, BackupAllPeriod},
+		{BackupMode("hourly"), false, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			if got := tt.mode.Valid(); got != tt.valid {
+				t.Errorf("Valid() = %v, want %v", got, tt.valid)
+			}
+			if got := tt.mode.Stats(); got != tt.stats {
+				t.Errorf("Stats() = %v, want %v", got, tt.stats)
+			}
+			if got := tt.mode.Period(); got != tt.period {
+				t.Errorf("Period() = %s, want %s", got, tt.period)
+			}
+		})
 	}
 }
 
@@ -163,9 +199,10 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 		{"unsupported version", `{"version":99,"host":"h"}`, "version"},
 		{"negative stats interval", `{"host":"h","stats_interval":"-5s"}`, "stats_interval"},
 		{"api_listen not an address", `{"host":"h","api_listen":"http://x"}`, "api_listen"},
-		{"backup_listen not an address", `{"host":"h","backup_listen":"http://x"}`, "backup_listen"},
-		{"backup_listen port out of range", `{"host":"h","backup_listen":":70000"}`, "backup_listen"},
-		{"backup_listen collides with api_listen", `{"host":"h","api_listen":":3000"}`, "same port"},
+		{"backup_url has no scheme", `{"host":"h","backup_url":"backup:8080/backup"}`, "backup_url"},
+		{"backup_url wrong scheme", `{"host":"h","backup_url":"ftp://backup/backup"}`, "backup_url"},
+		{"backup_url has no host", `{"host":"h","backup_url":"http:///backup"}`, "backup_url"},
+		{"unknown backup mode", `{"host":"h","backup_mode":"hourly"}`, "backup_mode"},
 		{"subscription base has no scheme", `{"host":"h","subscription_url_base":"vpn.example.test"}`, "subscription_url_base"},
 		{"subscription base wrong scheme", `{"host":"h","subscription_url_base":"ftp://vpn.example.test"}`, "subscription_url_base"},
 		{"subscription base has no host", `{"host":"h","subscription_url_base":"https://"}`, "subscription_url_base"},

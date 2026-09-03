@@ -83,20 +83,6 @@ jobs:
           # "unknown/unknown" attestation entry beside it.
           provenance: false
 
-      # A step on this job rather than a job of its own, so it reuses the checkout, QEMU,
-      # buildx and GHCR login above. Its own cache scope because the two images share no
-      # layers — one build arg's worth of Go, against a sing-box compile.
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: backup/Dockerfile
-          push: true
-          tags: ghcr.io/${{ github.repository }}-backup:latest
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=backup
-          cache-to: type=gha,mode=max,scope=backup
-          provenance: false
-
       # The Dockerfile already fails the build if sing-box lacks with_v2ray_api, so this
       # is not that check — it records the tags in the run log, where they are visible
       # without pulling the image.

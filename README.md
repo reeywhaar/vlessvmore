@@ -38,8 +38,7 @@ including connecting with Hiddify.
 - [The Reality handshake, and why Caddy helps](#the-reality-handshake-and-why-caddy-helps)
 - [Everyday use](#everyday-use)
 - [The web control panel](#the-web-control-panel)
-- [Backup and moving hosts](#backup-and-moving-hosts) — [the `/backup` endpoint](#the-backup-endpoint),
-  [the backup sidecar](#the-backup-sidecar)
+- [Backup and moving hosts](#backup-and-moving-hosts) — [automatic backups](#automatic-backups)
 - [config.json](#configjson)
 - [Things worth knowing](#things-worth-knowing)
 - [Building from source](#building-from-source)
@@ -68,8 +67,8 @@ manager that generates sing-box's config from a user list you edit through an AP
   │                   │  └─ per-user traffic (v2ray_api gRPC) ─┘   │
   │                   │                                            │
   │                   ├── :80          HTTP API (bearer token)     │
-  │                   ├── :3000        /backup                     │
-  │                   └── unix socket  the CLI                     │
+  │                   ├── unix socket  the CLI                     │
+  │                   └── backups ─POST─→ a backup agent           │
   └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -277,132 +276,145 @@ cannot retype.
 A dump contains the server's private key and every user's UUID. Treat it as a secret.
 Details in [CLI.md](CLI.md#export--import).
 
-### The `/backup` endpoint
+### Automatic backups
 
-`export` is a command someone has to remember to run. For scheduled backups there is a
-second HTTP listener — `backup_listen`, `:3000` by default — serving exactly one route:
+`export` is a command someone has to remember to run. `serve` also takes copies of its own
+and **posts** them to a backup agent — nothing fetches from this container, and there is no
+port to protect.
 
-```sh
-curl -O -J http://vlessvmore:3000/backup
+It used to work the other way: a second listener on `:3000` served `GET /backup` with no
+token at all, and a sidecar image of ours fetched it on a loop. Both are gone. A loop
+outside this process could only ever be a timer, because nothing out there can know whether
+anything has been written since the last copy; moving the decision inside is what makes
+"only when something changed" possible at all.
+
+Set the address and it starts:
+
+```json
+  "backup_url": "http://backup:8080/backup",
 ```
 
-The response is a gzipped tar named `vlessvmore-<YYYYMMDD_HHMMSS>.tgz`, laid out as the
-two directories a deployment mounts:
+**Nothing is backed up until that is set.** There is no default, because a default would be
+a guess at a hostname on a network this program cannot see.
+
+#### What is in the archive
+
+A gzipped tar named `vlessvmore-<YYYYMMDD_HHMMSS>.tgz`, laid out as the two directories a
+deployment mounts:
 
 ```
 config/config.json     the file you authored, byte for byte
 data/identity.json     the Reality keypair
 data/users.json        users, quotas, subscription tokens
 data/tokens.json       API token hashes
-data/stats.db          traffic history, a self-contained copy with no -wal
 data/sing-box.json     the rendered config (a build artifact; harmless to keep)
+data/stats.db          traffic history, a self-contained copy with no -wal
 ```
 
-So a restore is an extract. Stop the service first — writing over a live data directory
-is how you corrupt one:
+Files a deployment has not written yet are simply absent; a fresh install with no tokens
+has no `data/tokens.json`. Everything is mode `0600`, and there are no directory entries,
+so extracting does not change the permissions of directories you already have.
+
+`stats.db` comes out of `VACUUM INTO`, not a file copy — a whole, consistent database with
+its write-ahead log already folded in. That is what makes extracting it safe, and the reason
+not to just `tar` the data directory yourself.
+
+#### When it goes
+
+Whenever the deployment has changed, and at most once every five minutes. Nothing here
+reacts to a write, so adding six users in a minute produces one archive holding all six
+rather than six archives — the delay is a throttle as much as a delay. The first copy is
+taken at startup rather than five minutes in, because a process that has just started is the
+one most likely to have been restarted onto a volume nobody has a copy of.
+
+"Changed" means everything in the archive except `stats.db`: the config, the keypair, the
+users, the token hashes. Traffic is deliberately not part of it — it accrues every polling
+interval on a server nobody is administering, so letting it decide would turn every
+deployment back into one that uploads on a timer.
+
+`backup_mode` chooses what the archive carries, and whether there is a floor under how long
+a deployment can go without one:
+
+| mode | carries | sends |
+| --- | --- | --- |
+| `state` | everything but `stats.db` | when the deployment changes |
+| `relaxed` *(default)* | everything | when the deployment changes |
+| `all` | everything | when the deployment changes, **and** at least every 30 minutes |
+
+`relaxed` is the default because `stats.db` is small next to the reason anybody runs this —
+a year of hourly buckets for fifty users is a couple of megabytes — and an archive without
+it restores a server whose quota windows have all silently reset. `state` is worth choosing
+only if the archive's size actually matters to you.
+
+`all` exists for the traffic the change check ignores by design. If you want usage kept
+closely rather than as of the last time somebody added a user, the floor is what catches it.
+When the floor fires it backs up and the clock starts again, so a change that was waiting
+has gone out with it.
+
+**Neither number is a setting.** Five minutes and thirty minutes are constants. The delay
+trades how much of a burst becomes one archive against how long a change sits uncopied, and
+the floor exists only to catch traffic — both have one sensible answer on every deployment
+this runs on, and a knob would mostly be a way to get them wrong. What there is to choose is
+which of those promises you want, and that is the mode.
+
+What was last accepted is remembered in `stats.db`, not beside the users. The question is
+whether the *other* files changed, so recording the answer among them would change the thing
+being asked about and every check would find a change it had caused itself. Losing that
+record costs one redundant upload.
+
+#### Where it goes
+
+[backio-agent](https://github.com/reeywhaar/backio/tree/main/agent) takes an archive at
+`POST /backup` and does the rest: naming, optional AES-256 encryption, upload to any rclone
+remote, and retention at both ends. It is somebody else's image and it is generic, which is
+why this repository no longer publishes one of its own.
+
+```yaml
+services:
+  vlessvmore:
+    image: ghcr.io/reeywhaar/vlessvmore:latest
+    # "backup_url": "http://backup:8080/backup" in config.json
+    networks: [caddy, backup-net]
+
+  backup:
+    image: ghcr.io/reeywhaar/backio-agent:latest
+    environment:
+      BACKIO_HOST: http://backio:8080
+      BACKIO_PROVIDER: gdrive
+      BACKIO_SUBDIRECTORY: vlessvmore
+      BACKIO_TOKEN: "<issued by backio>"
+      BACKUP_PASSWORD: a-long-passphrase # optional AES-256
+    networks: [backup-net]
+```
+
+`docker-compose.example.yml` has this wired up ready to edit. Issue the token with:
+
+```sh
+docker exec backio /backio issue-token "gdrive vlessvmore create,read,delete"
+```
+
+`create` alone is enough to upload; `read,delete` as well lets the agent prune the remote.
+
+Note what vlessvmore does **not** hold: no token, no provider, no subdirectory, no knowledge
+of where its backups end up. Only the agent has those, and it is reachable from this
+project's own network and nowhere else. See the agent's own README for its retention
+settings.
+
+The archive is a secret in the same way a dump is: it carries the Reality private key and
+every user UUID. `BACKUP_PASSWORD` is worth setting when the remote is not yours — but the
+passphrase is not stored anywhere, so an archive whose passphrase is lost is an archive
+nobody can open.
+
+#### Restoring
+
+Restoring is extracting, and there is no `POST /restore`. Stop the service first, because
+writing over a live data directory is how you corrupt one:
 
 ```sh
 docker compose down
 tar xzf vlessvmore-20260729_031500.tgz -C /srv/vlessvmore
 docker compose up -d
 ```
-
-Files a deployment has not written yet are simply absent from the archive; a fresh install
-with no tokens has no `data/tokens.json`. Everything is mode `0600`, and there are no
-directory entries, so extracting does not change the permissions of directories you
-already have.
-
-`stats.db` comes out of `VACUUM INTO`, not a file copy — a whole, consistent database with
-its write-ahead log already folded in. That is what makes extracting it safe, and it is
-the reason not to just `tar` the data directory yourself.
-
-The mechanics are deliberately plain, so any backup tool can drive it — cron and `curl`,
-restic, Kopia, a CI job, or the sidecar in [`backup/`](backup/):
-
-- **Plain `GET`, no parameters.** Success is `200` with `Content-Type: application/gzip`
-  and an accurate `Content-Length`; the archive is built fully in memory before the first
-  byte is sent, so a partial body never masquerades as a complete backup. Failure is a
-  `4xx`/`5xx` with a JSON `{"error": …}` body. Check the status code and you are done.
-- **Safe on a running service**, which archiving `data/` from outside is not.
-- **Stateless and repeatable.** No cursor, no locking, no cleanup. Call it as often as you
-  like; every response is a full backup.
-- **No authentication, by design.** Which is why the port must never be published. Give it
-  only to the container that backs it up:
-
-  ```yaml
-  services:
-    vlessvmore:
-      # note: :3000 is deliberately absent from `ports:`
-      networks: [caddy, backup-net]
-    mybackup:
-      # reaches http://vlessvmore:3000/backup; nothing outside this network can
-      networks: [backup-net]
-  ```
-
-  A bearer token would not add much here — anything that can reach the port is already
-  inside your network — and it would be one more secret to rotate. If you would rather not
-  serve it at all, set `"backup_listen": ""` and stay with `export`.
-
-The archive is a secret in the same way a dump is: it carries the Reality private key and
-every user UUID. Encrypt it before it leaves the host if the destination is not one you
-control.
-
-### The backup sidecar
-
-[`backup/`](backup/) is a second image in this repo that does the obvious thing with that
-endpoint: fetch, keep a local copy, upload to
-[backio](https://github.com/Reeywhaar/backio), prune, sleep, repeat.
-`docker-compose.example.yml` has it wired up ready to uncomment.
-
-```
-ghcr.io/reeywhaar/vlessvmore-backup:latest
-```
-
-| variable | default | what |
-| --- | --- | --- |
-| `BACKIO_SUBDIRECTORY` | **required** | remote directory; must match the token's grant |
-| `VLESSVMORE_URL` | `http://vlessvmore:3000` | where the backup listener is |
-| `BACKUP_INTERVAL` | `3600` | seconds between backups |
-| `BACKIO_URL` | `http://backio:8080` | backio |
-| `BACKIO_PROVIDER` | `gdrive` | rclone remote name |
-| `BACKUP_TOKEN` | unset | backio token; **unset means local copies only, no upload** |
-| `BACKUP_PASSWORD` | unset | when set, upload a 7z AES-256 `.zip` instead of the plain `.tgz` |
-| `BACKUP_DIR` | `/backups` | where local copies are kept; set it and copies are always kept there |
-
-Archives are named `vlessvmore-<YYYYMMDD_HHMMSS>.<tgz|zip>`, mode `0600`, and kept in
-`/backups` — mount a volume there for copies that survive the remote being unreachable.
-
-**Mount nothing at `/backups` and no local copies are kept at all.** The image does not
-create that directory and Docker creates a mount target that the image is missing, so the
-directory exists exactly when a volume is mounted over it. Without one, each archive goes to
-a temp directory that the run deletes once the upload is done — a copy in the container's
-writable layer would vanish with the container anyway, which is the one moment a local copy
-would have earned its keep. With neither a volume nor a `BACKUP_TOKEN` there is nowhere to
-put the archive, and the run says so and exits non-zero rather than backing up to nothing.
-
-**Retention, applied to both the local directory and the remote:** the three newest
-archives from the newest day, the newest archive of each of the three newest days, and the
-newest archive of the previous week and the previous month. So seven archives at most,
-whatever the interval.
-
-Every slot is a calendar bucket keeper — the newest archive of a day, an ISO week, a month —
-rather than an archive of a given age. A bucket's keeper is settled once the bucket ends, so
-each run prunes to the same set the last one did, and the week and month slots hold real
-week- and month-old copies instead of whatever the first run happened to pin.
-
-Pruning the remote needs `read` and `delete` on the backio token; with a `create`-only
-token the uploads still work and the remote simply is not pruned:
-
-```sh
-docker exec backio /backio issue-token "gdrive vlessvmore create,read,delete"
-```
-
-`BACKUP_PASSWORD` is worth setting when the remote is not yours — but **the password is not
-stored anywhere**, so keep it somewhere other than the host being backed up. Without it the
-archive cannot be opened.
-
-Every run logs one JSON line per step to stdout, and a failed run exits non-zero, is logged,
-and is retried at the next interval rather than taking the container down.
 
 ## config.json
 
@@ -417,7 +429,8 @@ and is retried at the next interval rather than taking the container down.
   "flow": "xtls-rprx-vision",
   "fingerprint": "chrome",
   "api_listen": ":80",
-  "backup_listen": ":3000",
+  "backup_url": "http://backup:8080/backup",
+  "backup_mode": "relaxed",
   "log_level": "info",
   "stats_interval": "30s"
 }
@@ -432,11 +445,17 @@ and is retried at the next interval rather than taking the container down.
 | `handshake` | `<sni>:443` | the real TLS server traffic falls back to |
 | `flow` | `xtls-rprx-vision` | `""` for plain VLESS without vision |
 | `api_listen` | `:80` | management API bind address |
-| `backup_listen` | `:3000` | where [`/backup`](#the-backup-endpoint) is served; `""` to not serve it. **Never publish this port** |
+| `backup_url` | unset | where archives are posted; unset means [no backups](#automatic-backups) |
+| `backup_mode` | `relaxed` | `state`, `relaxed` or `all` — what the archive carries, and whether it has a floor |
 | `subscription_url_base` | `https://<host>` | origin clients fetch `/sub/<token>` from |
 | `cors_origins` | unset | origins allowed to call `/api` from a browser; `["*"]` for any |
 | `stats_interval` | `30s` | how often traffic is collected |
 | `template` | unset | path to a sing-box template overriding the built-in one |
+
+`backup_listen` is gone, and unknown fields are refused rather than ignored, so a config
+file that still has it stops `serve` with `unknown field "backup_listen"`. **Delete the
+line when you upgrade.** It used to serve `GET /backup` on a second port; nothing fetches
+from this service any more.
 
 Setting `name` is worth doing: without it a client labels the profile with the user's own
 name, so Alice's VPN is called "alice". It replaces the label in both places a client

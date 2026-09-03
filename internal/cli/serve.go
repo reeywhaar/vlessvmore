@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"vlessvmore/internal/api"
+	"vlessvmore/internal/backup"
 	"vlessvmore/internal/config"
 	"vlessvmore/internal/singbox"
 	"vlessvmore/internal/stats"
@@ -102,7 +103,15 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 	defer collector.Close()
 	go collector.Run(ctx)
 
-	server := api.New(cfg, configPath, st, mgr, log)
+	// Copies of the deployment, when the mode says one is due. Off unless an address was
+	// named — see internal/backup for why this program pushes rather than being pulled from.
+	go (&backup.Pusher{
+		Source: backup.Source{Store: st, ConfigPath: configPath, Log: log},
+		URL:    cfg.BackupURL,
+		Mode:   cfg.BackupMode,
+	}).Run(ctx)
+
+	server := api.New(cfg, st, mgr, log)
 
 	// Two listeners, two trust levels: the socket is unauthenticated because reaching
 	// it already means root in this container, the TCP port always requires a token.
@@ -117,9 +126,9 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 		Handler:           server.Handler(true),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	// Buffered for both senders, so the one that does not win the select still returns
-	// instead of blocking on a channel nobody reads again.
-	tcpErr := make(chan error, 2)
+	// Buffered, so a listener that stops after the select has already returned is not
+	// left blocking on a channel nobody reads again.
+	tcpErr := make(chan error, 1)
 	go func() {
 		log.Info("management api listening", "addr", cfg.APIListen, "socket", socketPath)
 		if err := tcpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -128,28 +137,6 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 		}
 		tcpErr <- nil
 	}()
-
-	// A third listener, unauthenticated like the socket, for the backup sidecar. It is
-	// only safe unpublished; see config.Config.BackupListen.
-	//
-	// Its failures share tcpErr because either listener dying is the same event: a
-	// misconfigured deployment that should stop rather than half-run.
-	var backupSrv *http.Server
-	if addr := cfg.BackupListenValue(); addr != "" {
-		backupSrv = &http.Server{
-			Addr:              addr,
-			Handler:           server.BackupHandler(),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-		go func() {
-			log.Info("backup listener listening", "addr", addr)
-			if err := backupSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				tcpErr <- fmt.Errorf("backup listener: %w", err)
-				return
-			}
-			tcpErr <- nil
-		}()
-	}
 
 	log.Info("vlessvmore started",
 		"host", cfg.Host, "port", cfg.Port, "data_dir", dataDir, "config", configPath)
@@ -167,11 +154,6 @@ func serve(cmd *cobra.Command, configPath, dataDir, socketPath string) error {
 	defer cancel()
 	if err := tcpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("shutting down the management api", "error", err)
-	}
-	if backupSrv != nil {
-		if err := backupSrv.Shutdown(shutdownCtx); err != nil {
-			log.Error("shutting down the backup listener", "error", err)
-		}
 	}
 	return nil
 }

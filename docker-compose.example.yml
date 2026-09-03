@@ -29,11 +29,6 @@ services:
       # directly. The management API is not published at all — Caddy reaches it
       # over the shared network below.
       - "8443:8443"
-      # Deliberately absent: :3000, the backup listener. It serves GET /backup —
-      # a tgz containing the Reality private key and every user UUID — with no
-      # token at all, so not being published is its only protection. Reach it
-      # from a sibling container on a shared network, or set
-      # "backup_listen": "" in config.json to switch it off.
 
     volumes:
       # A directory rather than a single file: room for more than config.json
@@ -65,8 +60,12 @@ services:
 
     networks:
       - caddy
-      # Shared with the backup sidecar below, and with nothing else. This is what
-      # reaches :3000 without publishing it.
+      # Reaches the backup agent below. Backups are pushed, so this is an outbound
+      # path rather than a way in — set "backup_url" in config.json to use it:
+      #
+      #   "backup_url": "http://backup:8080/backup"
+      #
+      # See README.md for what each backup_mode carries.
       - backup-net
 
     labels:
@@ -91,57 +90,50 @@ services:
       caddy.log.output: stdout
       caddy.log.format: json
 
-  # Optional. Fetches GET /backup on an interval and forwards the archive to backio,
-  # which uploads it to any rclone backend. Delete both services below if you back up
-  # some other way — the endpoint is a plain `curl` away; see README.md.
+  # Optional. vlessvmore posts an archive here whenever the deployment has changed;
+  # the agent names it, optionally encrypts it, forwards it to backio and prunes old
+  # copies at both ends. Delete both services below if you back up some other way —
+  # `vlessvmore export` is the manual route; see CLI.md.
+  #
+  # It is somebody else's image, generic across projects, which is why this repository
+  # no longer publishes one of its own:
+  # https://github.com/reeywhaar/backio/tree/main/agent
   backup:
-    image: ghcr.io/reeywhaar/vlessvmore-backup:latest
-    # To build from this checkout instead:
-    # build:
-    #   context: .
-    #   dockerfile: backup/Dockerfile
+    image: ghcr.io/reeywhaar/backio-agent:latest
     container_name: vlessvmore-backup
     restart: unless-stopped
-    depends_on:
-      - vlessvmore
 
     volumes:
-      # Local copies, rotated by the same retention policy as the remote: 3 from the
-      # newest day, 3 daily, 1 weekly, 1 monthly. Drop this mount and no local copies are
-      # kept at all — each archive is uploaded from a temp directory and deleted.
+      # Local copies, rotated by the same policy as the remote. Drop this mount and no
+      # local copies are kept — each archive is forwarded and deleted.
       - ./backups:/backups
 
     networks:
       - backup-net
 
     environment:
-      # --- required ---
-      # Remote subdirectory. Must match the one granted to BACKUP_TOKEN.
-      - BACKIO_SUBDIRECTORY=vlessvmore
-
-      # Seconds between backups.
-      - BACKUP_INTERVAL=3600
-
-      # --- where to fetch from ---
-      # Commented out because these are already the defaults, and they resolve to the
-      # service names in this file. Set them if vlessvmore or backio lives somewhere
-      # else — a different service name, another host, another port.
-      # - VLESSVMORE_URL=http://vlessvmore:3000
-      # - BACKIO_URL=http://backio:8080
-
-      # --- remote upload via backio (optional) ---
-      # Omit BACKUP_TOKEN entirely to keep backups local only. `create` is enough to
-      # upload; `read,delete` as well for the remote retention policy to run:
+      # Where the archives end up. All four together, or none of them — the agent
+      # refuses to start on a half-set group rather than accepting archives and
+      # quietly uploading nothing.
+      #
       #   docker exec backio /backio issue-token "gdrive vlessvmore create,read,delete"
+      #
+      # `create` alone is enough to upload; `read,delete` as well lets the retention
+      # policy prune the remote.
+      - BACKIO_HOST=http://backio:8080
       - BACKIO_PROVIDER=gdrive
-      - BACKUP_TOKEN=your-backio-token
+      - BACKIO_SUBDIRECTORY=vlessvmore
+      - BACKIO_TOKEN=your-backio-token
 
-      # --- encryption (optional but recommended) ---
-      # Set this and the archive is uploaded as a 7z AES-256 zip instead of a plain
-      # tgz. The archive holds the Reality private key and every user UUID, so if the
-      # remote is not yours, encrypt it. WITHOUT THIS PASSWORD THE BACKUP IS
+      # Optional, and recommended when the remote is not yours: the archive holds the
+      # Reality private key and every user UUID. WITHOUT THIS PASSWORD THE BACKUP IS
       # UNRECOVERABLE — store it somewhere other than this host.
       # - BACKUP_PASSWORD=change-me-and-store-it-safely
+
+      # Optional. Turns /health red when nothing has arrived in twice this window,
+      # which is how a deployment that stopped backing itself up gets noticed before
+      # the day somebody needs a backup.
+      # - BACKUP_EXPECT_EVERY=6h
 
   # backio forwards archives to a cloud provider (Google Drive, S3, ...).
   # See https://github.com/reeywhaar/backio
@@ -162,8 +154,10 @@ networks:
   #   docker network create caddy
   caddy:
     external: true
-  # Private to the three services above. The backup listener is unauthenticated, so
-  # nothing else should be able to reach it.
+  # Private to the three services above. The agent's upload endpoint takes an archive
+  # without a token — it is meant to be reachable from this project and nothing else,
+  # which is exactly why the credential for the remote lives on it rather than in
+  # vlessvmore.
   backup-net:
     driver: bridge
 

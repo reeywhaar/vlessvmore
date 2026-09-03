@@ -331,6 +331,10 @@ docker exec vlessvmore vlessvmore export --all > vlessvmore-backup.json
 Full command reference in [CLI.md](CLI.md). Keep that backup somewhere safe — it
 contains the server keypair and every user's credential.
 
+That is the copy you take by hand. For copies you do not have to remember, set
+`backup_url` in `config.json` and the server posts an archive to a backup agent whenever
+anything has changed — see [automatic backups](README.md#automatic-backups).
+
 ## If something is wrong
 
 **`curl https://vpn.example.com` fails**

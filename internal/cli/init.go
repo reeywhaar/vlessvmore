@@ -54,10 +54,6 @@ This command is standalone: no daemon, no data directory, no network.`,
 				return err
 			}
 
-			// Spelled out rather than left to applyDefaults: this literal is not parsed,
-			// so an omitted pointer field would marshal as null.
-			backupListen := config.DefaultBackupListen
-
 			cfg := &config.Config{
 				Version:             config.Version,
 				Name:                name,
@@ -69,7 +65,7 @@ This command is standalone: no daemon, no data directory, no network.`,
 				Fingerprint:         fingerprint,
 				SubscriptionURLBase: subBase,
 				APIListen:           config.DefaultAPIListen,
-				BackupListen:        &backupListen,
+				BackupMode:          config.DefaultBackupMode,
 				LogLevel:            config.DefaultLogLevel,
 			}
 			cfg.StatsInterval = config.Duration(config.DefaultStatsInterval)

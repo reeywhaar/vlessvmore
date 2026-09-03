@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +23,7 @@ const (
 	testPublicKey  = "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo"
 )
 
-// testConfig is what testServer both parses and writes to disk, so a backup's
-// config.json entry can be compared against a known byte string.
+// testConfig is the minimum that parses.
 const testConfig = `{
   "host": "vpn.example.test"
 }`
@@ -37,13 +34,6 @@ func testServer(t *testing.T) (*Server, *store.Store) {
 	cfg, err := config.Parse(strings.NewReader(testConfig))
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
-	}
-
-	// On disk as well as parsed: /backup ships the file itself, not a re-marshalled
-	// copy of the struct.
-	configPath := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(configPath, []byte(testConfig), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
 	}
 
 	st, err := store.Open(t.TempDir())
@@ -65,7 +55,7 @@ func testServer(t *testing.T) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	return New(cfg, configPath, st, mgr, log), st
+	return New(cfg, st, mgr, log), st
 }
 
 // mintToken creates a real API token and returns its secret. There is no bootstrap

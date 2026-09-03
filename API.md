@@ -35,8 +35,9 @@ unregistered path returns, and takes the same time to arrive. There is no `401` 
 never existed are all the same answer, on purpose — see
 [Refusals](#refusals) below.
 
-[`GET /backup`](#the-backup-port) is on a separate listener and is unauthenticated for the
-same reason the socket is: it is not exposed. Do not publish that port.
+There is no unauthenticated route on a second port any more. `GET /backup` used to be one;
+`serve` now posts its own archives to a backup agent instead. See
+[Backups](#backups) below.
 
 ## Errors
 
@@ -575,19 +576,24 @@ something unremarkable. Matches only the exact root — unknown paths still `404
 
 See [Subscriptions](#subscriptions) above.
 
-## The backup port
+## Backups
 
-`GET /backup` lives on a **listener of its own** — `backup_listen`, `:3000` by default —
-and is the only route that listener serves. It is not reachable on `api_listen` at all,
-and `api_listen`'s routes are not reachable on it.
+There is no backup endpoint. `serve` builds its own archive and **posts** it to a backup
+agent — nothing fetches from this service, so there is no unauthenticated route and no
+extra port to keep unpublished.
 
-```sh
-curl -O -J http://vlessvmore:3000/backup
+```json
+  "backup_url": "http://backup:8080/backup",
+  "backup_mode": "relaxed"
 ```
 
-`200` with `Content-Type: application/gzip`, an accurate `Content-Length`, and
-`Content-Disposition: attachment; filename="vlessvmore-<YYYYMMDD_HHMMSS>.tgz"`. The
-archive mirrors the two directories a deployment mounts:
+The request is a multipart `POST` with the archive under `backup` and its name beside it,
+which is [backio-agent's](https://github.com/reeywhaar/backio/tree/main/agent) upload
+protocol. No credential travels with it: the token for the remote belongs to the agent,
+which is the point of the agent.
+
+The archive is a gzipped tar named `vlessvmore-<YYYYMMDD_HHMMSS>.tgz`, mirroring the two
+directories a deployment mounts:
 
 | member | what |
 | --- | --- |
@@ -595,22 +601,20 @@ archive mirrors the two directories a deployment mounts:
 | `data/identity.json` | the Reality keypair |
 | `data/users.json` | users, quotas, subscription tokens |
 | `data/tokens.json` | API token hashes |
-| `data/stats.db` | traffic history, self-contained, no `-wal` or `-shm` |
 | `data/sing-box.json` | the rendered sing-box config |
+| `data/stats.db` | traffic history, self-contained, no `-wal` or `-shm` — omitted in `state` mode |
 
 Every member is a regular file with mode `0600`. There are no directory entries, so
-extracting cannot re-chmod directories that already exist, and files the deployment has
-not written yet are absent rather than empty. Errors are the usual `{"error": …}`, and
-anything other than `GET /backup` is a `404`.
+extracting cannot re-chmod directories that already exist, and files the deployment has not
+written yet are absent rather than empty. `stats.db` is produced with `VACUUM INTO`, so it
+is a consistent database with its write-ahead log folded in — which is why extracting it is
+safe while `tar`-ing the data directory from outside is not.
 
-The archive is assembled in memory before the response starts, so a `200` is never a
-partial backup. `stats.db` is produced with `VACUUM INTO`, so it is a consistent database
-with its write-ahead log folded in — which is why this is safe on a running service while
-`tar`-ing the data directory from outside is not.
-
-**Unauthenticated, so the port must never be published.** Publishing it hands the Reality
-private key and every user UUID to anyone who can reach the host. It is meant for a
-sibling container on a private network; `"backup_listen": ""` turns it off entirely.
+An archive goes out when anything in it other than `stats.db` has changed, at most once
+every five minutes, and — in `all` mode — at least every thirty. A rejection is logged with
+whatever the agent said and retried on the next pass; it is never recorded as a copy that
+exists. See [Backup and moving hosts](README.md#automatic-backups) for the modes and what
+each one carries.
 
 Restore is an extract, not an endpoint — there is no `POST /restore`. Stop the service
 first, because writing over a live data directory corrupts it:
@@ -621,6 +625,5 @@ tar xzf vlessvmore-20260729_031500.tgz -C /srv/vlessvmore
 docker compose up -d
 ```
 
-See [Backup and moving hosts](README.md#backup-and-moving-hosts) for driving this from a
-backup tool, and [CLI.md](CLI.md#export--import) for `export`/`import`, which remain the
-right tool for moving to a *different* host.
+See [CLI.md](CLI.md#export--import) for `export`/`import`, which remain the right tool for
+moving to a *different* host.
